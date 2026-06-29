@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-multipart
+# Imaging and AI tools
+opencv-python-headless
+numpy
+Pillow
+# OCR and models will be defined via env configs and implementations
+# E.g. transformers, torch, easyocr, etc.
+python-dateutil
