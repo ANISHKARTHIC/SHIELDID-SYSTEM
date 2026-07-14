@@ -36,6 +36,7 @@ class AuthenticityResponse(BaseModel):
     authenticity_score: int
     risk: str
     possible_issues: List[str]
+    manual_review_recommendation: bool
 
 class RiskRequest(BaseModel):
     ocr_confidence: float

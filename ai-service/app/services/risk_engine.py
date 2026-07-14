@@ -9,7 +9,7 @@ def calculate_risk(
     Generate a weighted recommendation based on AI and venue data.
     """
     risk_score = 0
-    recommendation = "APPROVE"
+    recommendation = "PASS"
     
     # 1. Base AI scores
     if ocr_confidence < 90:
@@ -37,9 +37,9 @@ def calculate_risk(
     if risk_score >= 80:
         recommendation = "DENY"
     elif risk_score >= 30:
-        recommendation = "MANUAL_REVIEW"
+        recommendation = "CHECK"
     else:
-        recommendation = "APPROVE"
+        recommendation = "PASS"
         
     return {
         "risk_score": risk_score,

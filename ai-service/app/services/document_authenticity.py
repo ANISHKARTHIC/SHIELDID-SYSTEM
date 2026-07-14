@@ -89,5 +89,6 @@ def assess_authenticity(
     return {
         "authenticity_score": int(round(max(0, score))),
         "risk": risk,
-        "possible_issues": issues
+        "possible_issues": issues,
+        "manual_review_recommendation": score < 85
     }

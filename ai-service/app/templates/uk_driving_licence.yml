@@ -1,0 +1,29 @@
+name: UK Driving Licence
+country: UK
+doc_type: driving_licence
+
+required_fields:
+  - surname
+  - first_name
+  - dob
+  - licence_number
+
+ocr_regions:
+  surname:
+    relative_y: [0.15, 0.25]
+    relative_x: [0.35, 0.9]
+  first_name:
+    relative_y: [0.22, 0.35]
+    relative_x: [0.35, 0.9]
+  dob:
+    relative_y: [0.32, 0.45]
+    relative_x: [0.35, 0.6]
+  licence_number:
+    relative_y: [0.55, 0.70]
+    relative_x: [0.35, 0.9]
+
+validators:
+  licence_number: '^[A-Z9]{5}\d{6}[A-Z9]{2}\d[A-Z]{2}$'
+  dob: '^(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|1[012])\.(19|20)\d\d$'
+
+minimum_age: 18

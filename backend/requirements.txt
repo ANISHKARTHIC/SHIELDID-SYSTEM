@@ -11,4 +11,6 @@ python-multipart
 celery
 redis
 httpx
-
+pgvector
+minio
+apscheduler

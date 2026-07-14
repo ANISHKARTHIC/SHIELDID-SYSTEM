@@ -4,8 +4,8 @@ from backend.core.logger import get_logger
 
 logger = get_logger("database")
 
-# Use SQLite exclusively to ensure 100% out-of-the-box local execution
-logger.info("Initializing SQLite database pub_entry.db.")
-engine = create_engine("sqlite:///./pub_entry.db", connect_args={"check_same_thread": False})
+# Use PostgreSQL for vector storage and production readiness
+logger.info("Initializing PostgreSQL database pub_entry_db on port 5433.")
+engine = create_engine("postgresql+psycopg2://admin:adminpassword@localhost:5433/pub_entry_db")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

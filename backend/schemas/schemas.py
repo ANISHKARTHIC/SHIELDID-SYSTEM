@@ -30,6 +30,9 @@ class CustomerResponse(BaseModel):
     membership_status: str = "None"
     visit_count: int = 1
     incidents_count: int = 0
+    vip_tier: str = "none"
+    manager_notes: Optional[str] = None
+    warnings: int = 0
 
     class Config:
         from_attributes = True
@@ -59,5 +62,5 @@ class VerificationDecision(BaseModel):
     authenticity_score: float
     risk_score: float
     ai_recommendation: str
-    staff_decision: str # APPROVE, REJECT, ESCALATE
+    staff_decision: str # pass, deny, check
     notes: Optional[str] = None
