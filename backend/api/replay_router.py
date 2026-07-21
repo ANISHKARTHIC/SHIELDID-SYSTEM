@@ -4,7 +4,6 @@ from typing import List, Dict, Any
 
 from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import VerificationSession, SessionAuditLog, User
-from backend.schemas.schemas import VerificationSessionResponse # Assuming this exists or I will just return dicts
 
 router = APIRouter(prefix="/api/v1/replay", tags=["replay"])
 

@@ -5,7 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db.session import SessionLocal
-from backend.models.models import Customer, VerificationLog
+from backend.models.models import Customer, VerificationSession
 from backend.services.storage_service import storage_service
 from backend.core.logger import get_logger
 
@@ -27,14 +27,14 @@ def delete_expired_records():
             customer.face_embedding = None
             
             # Also find all logs for this customer and delete the images from MinIO
-            logs = db.query(VerificationLog).filter(VerificationLog.customer_id == customer.id).all()
-            for log in logs:
-                if log.id_image_path:
-                    storage_service.delete_image(log.id_image_path)
-                    log.id_image_path = None
-                if log.face_image_path:
-                    storage_service.delete_image(log.face_image_path)
-                    log.face_image_path = None
+            sessions = db.query(VerificationSession).filter(VerificationSession.customer_id == customer.id).all()
+            for session in sessions:
+                if session.id_image_path:
+                    storage_service.delete_image(session.id_image_path)
+                    session.id_image_path = None
+                if session.face_image_path:
+                    storage_service.delete_image(session.face_image_path)
+                    session.face_image_path = None
                     
             db.commit()
             

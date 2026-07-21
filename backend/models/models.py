@@ -231,3 +231,14 @@ class Session(Base):
     refresh_token = Column(String, index=True)
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    venue_id = Column(Integer, ForeignKey("venues.id"))
+    message = Column(String)
+    type = Column(String) # ALERT, INFO, SUCCESS
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    venue = relationship("Venue")

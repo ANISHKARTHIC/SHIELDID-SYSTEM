@@ -14,6 +14,7 @@ class SessionService:
             state=SessionStateEnum.CREATED
         )
         db.add(session)
+        db.flush() # Force insert of parent session before audit log
         
         audit_log = SessionAuditLog(
             session_id=session_id,

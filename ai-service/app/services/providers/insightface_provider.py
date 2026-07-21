@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from typing import Dict, Any
 from numpy.linalg import norm
-from backend.services.providers.base_providers import BaseFaceRecognition
+from app.services.providers.base_providers import BaseFaceRecognition
 
 logger = logging.getLogger("insightface_provider")
 
@@ -15,10 +15,13 @@ class InsightFaceProvider(BaseFaceRecognition):
         """Loads InsightFace (RetinaFace + ArcFace) into memory."""
         try:
             from insightface.app import FaceAnalysis
-            # 'buffalo_l' contains both RetinaFace for detection and ArcFace for recognition
-            self.app = FaceAnalysis(name='buffalo_l')
-            # Assuming ctx_id=0 for GPU, -1 for CPU. Will use CPU for dev to avoid CUDA errors unless GPU is available.
-            self.app.prepare(ctx_id=-1, det_size=(640, 640))
+            # Support GPU execution falling back to CPU
+            self.app = FaceAnalysis(
+                name='buffalo_l',
+                providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+            )
+            # ctx_id=0 for GPU. If CUDA is missing, providers list will safely fallback to CPU.
+            self.app.prepare(ctx_id=0, det_size=(640, 640))
             logger.info("InsightFace model loaded successfully.")
         except ImportError:
             logger.error("insightface module not installed. Run `pip install insightface onnxruntime`")

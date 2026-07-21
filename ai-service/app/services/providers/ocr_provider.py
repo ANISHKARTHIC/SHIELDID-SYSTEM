@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any
-from backend.services.providers.base_providers import BaseOCR
+from app.services.providers.base_providers import BaseOCR
 
 logger = logging.getLogger("ocr_provider")
 

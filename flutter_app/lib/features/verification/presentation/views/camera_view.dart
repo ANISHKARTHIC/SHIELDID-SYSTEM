@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:image_picker/image_picker.dart';
 import 'ocr_review_view.dart';
 
 class CameraView extends StatefulWidget {
-  const CameraView({Key? key}) : super(key: key);
+  final String sessionId;
+  const CameraView({super.key, required this.sessionId});
 
   @override
   State<CameraView> createState() => _CameraViewState();
@@ -29,11 +31,15 @@ class _CameraViewState extends State<CameraView> {
       enableAudio: false,
     );
     
-    await _controller!.initialize();
-    if (mounted) {
-      setState(() {
-        _isCameraInitialized = true;
-      });
+    try {
+      await _controller!.initialize();
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error initializing camera: $e');
     }
   }
 
@@ -48,12 +54,27 @@ class _CameraViewState extends State<CameraView> {
     
     try {
       final image = await _controller!.takePicture();
-      // Navigate to next step with image path
-      if (mounted) {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => OCRReviewView(imagePath: image.path)));
-      }
+      _navigateToReview(image.path);
     } catch (e) {
-      print(e);
+      // Handle camera exception
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    
+    if (image != null) {
+      _navigateToReview(image.path);
+    }
+  }
+
+  void _navigateToReview(String path) {
+    if (mounted) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => OCRReviewView(
+        imagePath: path,
+        sessionId: widget.sessionId,
+      )));
     }
   }
 
@@ -72,7 +93,7 @@ class _CameraViewState extends State<CameraView> {
           
           // Guide Frame Overlay
           ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.6), BlendMode.srcOut),
+            colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.6), BlendMode.srcOut),
             child: Stack(
               fit: StackFit.expand,
               children: [
@@ -105,24 +126,38 @@ class _CameraViewState extends State<CameraView> {
             ),
           ),
           
-          // Capture Button
+          // Bottom Controls
           Positioned(
             bottom: 60,
             left: 0,
             right: 0,
-            child: Center(
-              child: GestureDetector(
-                onTap: _takePicture,
-                child: Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 4),
-                    color: Colors.white.withOpacity(0.3),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // Spacer for symmetry
+                const SizedBox(width: 60),
+                
+                // Capture Button
+                GestureDetector(
+                  onTap: _takePicture,
+                  child: Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 4),
+                      color: Colors.white.withValues(alpha: 0.3),
+                    ),
                   ),
                 ),
-              ),
+                
+                // Upload Button
+                IconButton(
+                  onPressed: _pickImage,
+                  icon: const Icon(Icons.photo_library, color: Colors.white, size: 36),
+                  tooltip: 'Upload from Gallery',
+                ),
+              ],
             ),
           ),
           
