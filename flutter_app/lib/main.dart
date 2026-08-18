@@ -66,7 +66,17 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _checkExistingSession() async {
-    final token = await TokenStorage.readToken();
+    String? token;
+    try {
+      token = await TokenStorage.readToken();
+    } catch (e) {
+      // A corrupted secure-storage entry (e.g. an Android auto-backup
+      // restored the encrypted prefs file without its Keystore-bound key)
+      // throws here rather than returning null. Treat it the same as "no
+      // token" instead of leaving the gate stuck on checkingSession forever.
+      debugPrint('TokenStorage.readToken() failed: $e');
+      token = null;
+    }
     final hasToken = token != null && token.isNotEmpty;
 
     if (!hasToken) {

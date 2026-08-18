@@ -314,15 +314,52 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         # GLOBAL FALLBACK CHECKS (If labels were not parsed correctly)
         # -------------------------------------------------------------
         if not fields["licence_number"]:
-            # General regex search for 16-char licence number (lenient for OCR errors and attached issue numbers)
+            # General regex search for 16-char licence number (lenient for OCR errors and attached issue numbers).
+            # Guarded against matching boxes already claimed by the surname/
+            # first_names/DOB fields — those are frequently vertically close
+            # to field 5 on a UK licence, and the box-merging step above can
+            # accidentally concatenate them into a run of characters that
+            # coincidentally fits the 16-char licence-number shape (e.g. a
+            # surname + DOB digits + initials merging into a bogus "number").
             licence_regex = re.compile(r'([A-Z]{5}[0-9OISZBG]{6}[A-Z]{2}[A-Z0-9OISZBG]{3})', re.IGNORECASE)
+            claimed_texts = {
+                fields["surname"].upper(),
+                fields["first_names"].upper(),
+                fields["date_of_birth"].upper(),
+            } - {""}
+            best_candidate = None
+            best_box_conf = None
             for box in boxes:
-                cleaned = box["text"].replace(" ", "").upper()
-                match = licence_regex.search(cleaned)
-                if match:
-                    fields["licence_number"] = match.group(1)
-                    confidences["licence_number"] = box["conf"]
+                box_text = box["text"].upper()
+                if box_text in claimed_texts:
+                    continue
+                cleaned = box_text.replace(" ", "")
+                for match in licence_regex.finditer(cleaned):
+                    candidate = match.group(1)
+                    # Cross-check against surname/first_names when we already
+                    # found them from their own labeled fields — a genuine
+                    # licence number's first 5 chars encode the surname and
+                    # chars 12-13 encode initials, so a fallback shape-match
+                    # that contradicts already-trusted name fields is very
+                    # likely EasyOCR merging adjacent name/DOB/initials text
+                    # into one box that coincidentally fits the 16-char shape
+                    # (confirmed real failure mode: a merged box read as
+                    # "JOHNI011081JWIFN" passed pure DVLA-formula validation
+                    # since its self-encoded month/day still happened to be
+                    # in range, so format-only validation cannot catch it).
+                    check = self.validate_licence_number(
+                        candidate, fields["surname"], fields["date_of_birth"], fields["first_names"]
+                    )
+                    if not check["valid"]:
+                        continue
+                    if best_candidate is None:
+                        best_candidate = candidate
+                        best_box_conf = box["conf"]
+                if best_candidate:
                     break
+            if best_candidate:
+                fields["licence_number"] = best_candidate
+                confidences["licence_number"] = best_box_conf
 
         if not fields["date_of_birth"]:
             # If DOB label failed, parse earliest date found in the file

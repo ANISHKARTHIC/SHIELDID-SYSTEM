@@ -33,6 +33,7 @@ class _OCRReviewViewState extends State<OCRReviewView> {
 
   bool _isLoading = true;
   String? _error;
+  String _documentType = 'unknown';
 
   static const _notLegiblePlaceholder = 'NOT LEGIBLE';
 
@@ -107,6 +108,7 @@ class _OCRReviewViewState extends State<OCRReviewView> {
           _addressController.text = _cleanField(extracted['address']);
           _issueDateController.text = _cleanField(extracted['issue_date']);
           _expiryDateController.text = _cleanField(extracted['expiry_date']);
+          _documentType = extracted['document_type'] ?? 'unknown';
           _isLoading = false;
         });
       }
@@ -219,7 +221,7 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                             ? _addressController.text
                             : 'NOT LEGIBLE',
                         'doc_number': _licenceController.text,
-                        'doc_type': 'driving_licence_or_passport',
+                        'doc_type': _documentType,
                         'expiry_date': _expiryDateController.text.isNotEmpty
                             ? _expiryDateController.text
                             : 'NOT LEGIBLE',

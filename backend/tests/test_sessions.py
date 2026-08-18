@@ -2,7 +2,7 @@ import unittest
 import json
 from unittest.mock import patch, MagicMock
 from backend.tests.conftest import client, init_test_db, TestingSessionLocal, auth_headers
-from backend.models.models import VerificationSession, SessionStateEnum, Blacklist, Customer
+from backend.models.models import VerificationSession, SessionStateEnum, Blacklist, Customer, Document
 
 class TestSessionEndpoints(unittest.TestCase):
     def setUp(self):
@@ -44,8 +44,12 @@ class TestSessionEndpoints(unittest.TestCase):
             "ocr": {
                 "document_number": "SMITH901018AB9IJ",
                 "name": "JOHN SMITH",
-                "dob": "1990-01-01"
+                "dob": "1990-01-01",
+                "document_type": "uk_driving_licence",
+                "expiry_date": "2030-01-01",
+                "issue_date": "2020-01-01"
             },
+            "classification": {"document_type": "uk_driving_licence"},
             "embedding": [0.1] * 512,
             "validation": {"is_valid": True}
         }
@@ -70,6 +74,13 @@ class TestSessionEndpoints(unittest.TestCase):
             self.assertEqual(sess.state, SessionStateEnum.APPROVED)
             self.assertEqual(sess.final_decision, "pass")
             self.assertTrue(sess.is_locked)
+
+            doc = db.query(Document).filter(Document.customer_id == sess.customer_id).first()
+            self.assertIsNotNone(doc)
+            self.assertEqual(doc.doc_type, "uk_driving_licence")
+            self.assertEqual(doc.doc_number, "SMITH901018AB9IJ")
+            self.assertIsNotNone(doc.expiry_date)
+            self.assertIsNotNone(doc.issue_date)
         finally:
             db.close()
 

@@ -355,6 +355,31 @@ async def finalize_session(
         db.add(customer)
         db.commit()
         db.refresh(customer)
+
+    # Persist the real OCR extraction as a Document row so the admin
+    # console (GET /visitors) can show the actual document type/number/
+    # expiry instead of always falling back to "other"/blank.
+    def _parse_doc_date(value):
+        if not value:
+            return None
+        try:
+            from dateutil import parser as date_parser
+            return date_parser.parse(value)
+        except Exception:
+            return None
+
+    classification = session_data.get("classification", {})
+    document = Document(
+        customer_id=customer.id,
+        doc_type=ocr.get("document_type") or classification.get("document_type") or "other",
+        doc_number=unique_id,
+        expiry_date=_parse_doc_date(ocr.get("expiry_date")),
+        issue_date=_parse_doc_date(ocr.get("issue_date")),
+        nationality=ocr.get("nationality"),
+        extracted_data=ocr,
+    )
+    db.add(document)
+    db.commit()
     if final_decision_str == "pass":
         final_state = SessionStateEnum.APPROVED
     elif final_decision_str == "deny":

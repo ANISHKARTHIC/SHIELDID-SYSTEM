@@ -5,6 +5,7 @@ import 'decision_view.dart';
 import '../../data/datasources/remote_data_source.dart';
 import '../../../../core/widgets/camera_scaffold.dart';
 import '../../../../core/navigation/app_page_route.dart';
+import '../../../../core/security/camera_permission_service.dart';
 
 class FaceCaptureView extends StatefulWidget {
   final String sessionId;
@@ -33,6 +34,18 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
   }
 
   Future<void> _initCamera() async {
+    final permission = await CameraPermissionService.ensureGranted();
+    if (!permission.granted) {
+      if (mounted) {
+        setState(() {
+          _error = permission.permanentlyDenied
+              ? 'Camera access is disabled for VenuePass. Open Settings to enable it, or use Upload instead.'
+              : 'Camera access is required to verify your identity. Please allow it, or use Upload instead.';
+        });
+      }
+      return;
+    }
+
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
       if (mounted) setState(() => _error = 'No camera is available on this device.');
