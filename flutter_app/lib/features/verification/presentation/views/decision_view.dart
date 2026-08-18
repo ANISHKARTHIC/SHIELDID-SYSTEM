@@ -33,6 +33,22 @@ class DecisionView extends StatefulWidget {
   State<DecisionView> createState() => _DecisionViewState();
 }
 
+class _DecisionOutcome {
+  final Color top;
+  final Color bottom;
+  final IconData icon;
+  final String label;
+  final Color panelBg;
+
+  const _DecisionOutcome({
+    required this.top,
+    required this.bottom,
+    required this.icon,
+    required this.label,
+    required this.panelBg,
+  });
+}
+
 class _DecisionViewState extends State<DecisionView> with SingleTickerProviderStateMixin {
   bool _isSubmitting = false;
   bool _decisionRecorded = false;
@@ -185,41 +201,48 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
     }
   }
 
+  _DecisionOutcome _outcomeFor(String decision) {
+    switch (decision) {
+      case 'BLOCKED':
+        return const _DecisionOutcome(
+          top: Color(0xFFDC2626),
+          bottom: Color(0xFFB91C1C),
+          icon: Icons.block_rounded,
+          label: 'Blocked',
+          panelBg: Color(0x29000000),
+        );
+      case 'DENY':
+        return const _DecisionOutcome(
+          top: Color(0xFFDC2626),
+          bottom: Color(0xFFB91C1C),
+          icon: Icons.cancel_rounded,
+          label: 'Deny',
+          panelBg: Color(0x29000000),
+        );
+      case 'PASS':
+        return const _DecisionOutcome(
+          top: Color(0xFF16A34A),
+          bottom: Color(0xFF15803D),
+          icon: Icons.check_rounded,
+          label: 'Allow',
+          panelBg: Color(0x1AFFFFFF),
+        );
+      case 'CHECK':
+      default:
+        return const _DecisionOutcome(
+          top: Color(0xFFEA580C),
+          bottom: Color(0xFFC2410C),
+          icon: Icons.priority_high_rounded,
+          label: 'Check',
+          panelBg: Color(0x24000000),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    Color accentColor;
-    Color softColor;
-    IconData icon;
-    String label;
-
-    switch (widget.decision) {
-      case 'BLOCKED':
-        accentColor = colors.danger;
-        softColor = colors.dangerSoft;
-        icon = Icons.block;
-        label = 'Blocked';
-        break;
-      case 'PASS':
-        accentColor = colors.success;
-        softColor = colors.successSoft;
-        icon = Icons.check_circle_outline;
-        label = 'Allow';
-        break;
-      case 'DENY':
-        accentColor = colors.danger;
-        softColor = colors.dangerSoft;
-        icon = Icons.cancel_outlined;
-        label = 'Deny';
-        break;
-      case 'CHECK':
-      default:
-        accentColor = colors.warning;
-        softColor = colors.warningSoft;
-        icon = Icons.warning_amber_outlined;
-        label = 'Check';
-        break;
-    }
+    final outcome = _outcomeFor(widget.decision);
 
     if (_decisionRecorded) {
       return Scaffold(
@@ -237,7 +260,7 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
               const SizedBox(height: 16),
               Text(
                 'Decision recorded',
-                style: TextStyle(color: colors.ink, fontSize: 18, fontWeight: FontWeight.w800),
+                style: TextStyle(color: colors.ink, fontSize: 18, fontWeight: FontWeight.w700),
               ),
             ],
           ),
@@ -246,171 +269,230 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Decision')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-          child: AnimatedBuilder(
-            animation: _revealController,
-            builder: (context, _) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  AppSurface(
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      children: [
-                        Opacity(
-                          opacity: _iconOpacity.value,
-                          child: Transform.scale(
-                            scale: _iconScale.value,
-                            child: Container(
-                              width: 96,
-                              height: 96,
-                              decoration: BoxDecoration(color: softColor, shape: BoxShape.circle),
-                              child: Icon(icon, size: 54, color: accentColor),
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [outcome.top, outcome.bottom],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(28, 8, 28, 20),
+                  child: AnimatedBuilder(
+                    animation: _revealController,
+                    builder: (context, _) {
+                      return Column(
+                        children: [
+                          const SizedBox(height: 12),
+                          Opacity(
+                            opacity: _iconOpacity.value,
+                            child: Transform.scale(
+                              scale: _iconScale.value,
+                              child: Container(
+                                width: 104,
+                                height: 104,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(outcome.icon, size: 54, color: Colors.white),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 18),
-                        Opacity(
-                          opacity: _labelSlide.value,
-                          child: Transform.translate(
-                            offset: Offset(0, (1 - _labelSlide.value) * 8),
+                          const SizedBox(height: 22),
+                          Opacity(
+                            opacity: _labelSlide.value,
+                            child: Transform.translate(
+                              offset: Offset(0, (1 - _labelSlide.value) * 8),
+                              child: Text(
+                                outcome.label,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 44,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.02,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Opacity(
+                            opacity: _reasonOpacity.value,
                             child: Text(
-                              label,
+                              widget.reason,
                               textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 48, fontWeight: FontWeight.w900, color: accentColor),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.85),
+                                fontSize: 14,
+                                height: 1.4,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Opacity(
-                          opacity: _reasonOpacity.value,
-                          child: Text(
-                            widget.reason,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: colors.muted, fontSize: 15, height: 1.35, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Opacity(
-                    opacity: _detailsSlide.value,
-                    child: Transform.translate(
-                      offset: Offset(0, (1 - _detailsSlide.value) * 12),
-                      child: AppSurface(
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                        child: Column(
-                          children: [
-                            _buildDetailRow(colors, 'Age', _calculateAge(widget.ocrData['ocr_dob'])),
-                            Divider(color: colors.line, height: 1),
-                            if (widget.riskScore != null) ...[
-                              _buildDetailRow(colors, 'Risk Score', '${(widget.riskScore! * 100).clamp(0, 100).toInt()}%'),
-                              Divider(color: colors.line, height: 1),
-                            ],
-                            _buildDetailRow(
-                              colors,
-                              'Venue Status',
-                              widget.isBlacklisted ? 'Restricted' : 'Clear',
+                          const SizedBox(height: 26),
+                          Opacity(
+                            opacity: _detailsSlide.value,
+                            child: Transform.translate(
+                              offset: Offset(0, (1 - _detailsSlide.value) * 12),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 18),
+                                decoration: BoxDecoration(
+                                  color: outcome.panelBg,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Column(
+                                  children: [
+                                    _buildDetailRow('Age', _calculateAge(widget.ocrData['ocr_dob'])),
+                                    Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
+                                    if (widget.riskScore != null) ...[
+                                      _buildDetailRow('Risk Score', '${(widget.riskScore! * 100).clamp(0, 100).toInt()}%'),
+                                      Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
+                                    ],
+                                    _buildDetailRow(
+                                      'Venue Status',
+                                      widget.isBlacklisted ? 'Restricted' : 'Clear',
+                                    ),
+                                    if (widget.incidentCount > 0) ...[
+                                      Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
+                                      _buildDetailRow('Prior Incidents', widget.incidentCount.toString()),
+                                    ],
+                                  ],
+                                ),
+                              ),
                             ),
-                            if (widget.incidentCount > 0) ...[
-                              Divider(color: colors.line, height: 1),
-                              _buildDetailRow(colors, 'Prior Incidents', widget.incidentCount.toString()),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
+                          ),
+                          const SizedBox(height: 28),
+                          Opacity(
+                            opacity: _actionsSlide.value,
+                            child: Transform.translate(
+                              offset: Offset(0, (1 - _actionsSlide.value) * 12),
+                              child: _buildActions(outcome),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  const SizedBox(height: 28),
-                  Opacity(
-                    opacity: _actionsSlide.value,
-                    child: Transform.translate(
-                      offset: Offset(0, (1 - _actionsSlide.value) * 12),
-                      child: _buildActions(colors),
-                    ),
-                  ),
-                ],
-              );
-            },
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildActions(AppColorsExt colors) {
+  Widget _buildActions(_DecisionOutcome outcome) {
     final enabled = _actionsEnabled && !_isSubmitting;
 
     if (widget.decision == 'BLOCKED') {
-      return ElevatedButton(
-        onPressed: enabled ? () => _confirmAndSubmit('BLOCK', isDestructiveOverride: true) : null,
-        style: ElevatedButton.styleFrom(backgroundColor: colors.danger),
-        child: _isSubmitting
-            ? const SizedBox(
-                height: 22,
-                width: 22,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
-              )
-            : const Text('Dismiss Restricted Entry'),
+      return SizedBox(
+        width: double.infinity,
+        height: 58,
+        child: OutlinedButton(
+          onPressed: enabled ? () => _confirmAndSubmit('BLOCK', isDestructiveOverride: true) : null,
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.45), width: 1.4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          child: _isSubmitting
+              ? const SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
+                )
+              : const Text(
+                  'Dismiss Restricted Entry',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+        ),
       );
     }
 
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton(
-            onPressed: enabled ? () => _confirmAndSubmit('BLOCK') : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colors.danger,
-              side: BorderSide(color: colors.danger),
-              minimumSize: const Size.fromHeight(56),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: SizedBox(
+            height: 56,
+            child: OutlinedButton(
+              onPressed: enabled ? () => _confirmAndSubmit('BLOCK') : null,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.4), width: 1.4),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(
+                      widget.decision == 'CHECK' ? 'Deny' : 'Restrict',
+                      style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 15),
+                    ),
             ),
-            child: _isSubmitting
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Restrict', style: TextStyle(fontWeight: FontWeight.w900)),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: ElevatedButton(
-            onPressed: enabled ? () => _confirmAndSubmit('PASS') : null,
-            style: ElevatedButton.styleFrom(backgroundColor: colors.success),
-            child: _isSubmitting
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
-                  )
-                : const Text('Allow'),
+          child: SizedBox(
+            height: 56,
+            child: ElevatedButton(
+              onPressed: enabled ? () => _confirmAndSubmit('PASS') : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: outcome.bottom,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              child: _isSubmitting
+                  ? SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(color: outcome.bottom, strokeWidth: 2.4),
+                    )
+                  : Text(
+                      widget.decision == 'CHECK' ? 'Approve' : 'Allow',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                    ),
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildDetailRow(AppColorsExt colors, String label, String value) {
+  Widget _buildDetailRow(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 15),
+          padding: const EdgeInsets.symmetric(vertical: 14),
           child: Text(
             label,
-            style: TextStyle(color: colors.muted, fontSize: 15, fontWeight: FontWeight.w700),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 14, fontWeight: FontWeight.w600),
           ),
         ),
         Text(
           value,
-          style: TextStyle(color: colors.ink, fontSize: 18, fontWeight: FontWeight.w900),
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
         ),
       ],
     );

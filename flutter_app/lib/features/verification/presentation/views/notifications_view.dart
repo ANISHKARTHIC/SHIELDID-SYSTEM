@@ -84,77 +84,72 @@ class _NotificationsViewState extends State<NotificationsView> {
         ),
       );
     } else {
-      content = ListView.builder(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      content = ListView.separated(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         itemCount: _notifications.length,
+        separatorBuilder: (context, index) => Divider(color: colors.line, height: 1),
         itemBuilder: (context, index) {
           final notif = _notifications[index];
           final isAlert = notif['type'] == 'ALERT';
           final isUnread = notif['is_read'] == false;
-          final color = isAlert ? colors.danger : colors.primary;
+          final color = isAlert ? colors.danger : colors.ink;
 
           DateTime date =
               DateTime.tryParse(notif['created_at'] ?? '') ?? DateTime.now();
           String formattedDate = DateFormat('MMM d, HH:mm').format(date);
 
           return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: AppSurface(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(
-                      isAlert
-                          ? Icons.warning_amber_rounded
-                          : Icons.info_outline_rounded,
-                      color: color,
-                    ),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (notif['message'] as String?)?.trim().isNotEmpty == true
-                              ? notif['message']
-                              : 'Alert',
-                          style: TextStyle(
-                            color: colors.ink,
-                            fontSize: 16,
-                            height: 1.25,
-                            fontWeight: isUnread ? FontWeight.w900 : FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        StatusPill(
-                          label: formattedDate,
-                          color: color,
-                          icon: Icons.schedule_rounded,
-                        ),
-                      ],
-                    ),
+                  child: Icon(
+                    isAlert
+                        ? Icons.warning_amber_rounded
+                        : Icons.info_outline_rounded,
+                    color: color,
+                    size: 18,
                   ),
-                  if (isUnread)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      margin: const EdgeInsets.only(top: 4),
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (notif['message'] as String?)?.trim().isNotEmpty == true
+                            ? notif['message']
+                            : 'Alert',
+                        style: TextStyle(
+                          color: colors.ink,
+                          fontSize: 15,
+                          height: 1.3,
+                          fontWeight: isUnread ? FontWeight.w700 : FontWeight.w500,
+                        ),
                       ),
-                    ),
-                ],
-              ),
+                      const SizedBox(height: 6),
+                      Text(
+                        formattedDate,
+                        style: TextStyle(color: colors.muted, fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isUnread)
+                  Container(
+                    width: 7,
+                    height: 7,
+                    margin: const EdgeInsets.only(top: 5),
+                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+              ],
             ),
           );
         },

@@ -12,6 +12,21 @@ class RemoteDataSource {
     return response.data;
   }
 
+  /// Backend readiness (database/redis/AI service connectivity), used to
+  /// drive the Home screen's real system-status rows. `/ready` lives at the
+  /// app root, not under the `/api/v1` prefix the main Dio client uses.
+  Future<Map<String, dynamic>> getReadiness() async {
+    final apiBaseUrl = _dio.options.baseUrl;
+    final rootUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+    final response = await Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 5),
+      ),
+    ).get('$rootUrl/ready');
+    return response.data as Map<String, dynamic>;
+  }
+
   Future<String> startSession() async {
     final response = await _dio.post('/session/start');
     return response.data['session_id'];

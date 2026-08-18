@@ -1,45 +1,44 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-/// Light-mode palette. Kept as bare static constants for backward
-/// compatibility with screens not yet migrated to [AppColorsX] — new/touched
-/// screens should read colors via `context.colors.xxx` instead, which is
-/// theme-aware (light vs dark).
+/// Light-mode palette — "Refined Minimal": near-white canvas, near-black
+/// ink, a single hairline border color, and semantic accents used sparingly.
+/// Kept as bare static constants for backward compatibility; new/touched
+/// screens should read colors via `context.colors.xxx` instead (theme-aware).
 class AppColors {
-  static const Color ink = Color(0xFF172033);
-  static const Color muted = Color(0xFF667085);
-  static const Color line = Color(0xFFE4E7EC);
-  static const Color canvas = Color(0xFFF8FAFC);
+  static const Color ink = Color(0xFF18181B);
+  static const Color muted = Color(0xFF71717A);
+  static const Color line = Color(0xFFE4E4E7);
+  static const Color canvas = Color(0xFFFAFAFA);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceRaised = Color(0xFFF1F4F8);
-  static const Color primary = Color(0xFF2563EB);
-  static const Color primarySoft = Color(0xFFEFF6FF);
-  static const Color success = Color(0xFF039855);
-  static const Color successSoft = Color(0xFFECFDF3);
-  static const Color warning = Color(0xFFF79009);
-  static const Color warningSoft = Color(0xFFFFFAEB);
-  static const Color danger = Color(0xFFD92D20);
-  static const Color dangerSoft = Color(0xFFFEF3F2);
+  static const Color surfaceRaised = Color(0xFFF4F4F5);
+  static const Color primary = Color(0xFF18181B);
+  static const Color primarySoft = Color(0xFFF4F4F5);
+  static const Color success = Color(0xFF16A34A);
+  static const Color successSoft = Color(0xFFDCFCE7);
+  static const Color warning = Color(0xFFEA580C);
+  static const Color warningSoft = Color(0xFFFFEDD5);
+  static const Color danger = Color(0xFFDC2626);
+  static const Color dangerSoft = Color(0xFFFEE2E2);
 }
 
-/// Dark-mode palette — a deep blue-slate scale rather than pure black/white,
-/// so shadows/elevation still read and text doesn't cause halation. Hues
-/// match the light palette for brand consistency but are brighter/more
-/// saturated where needed for legibility on a dark background.
+/// Dark-mode palette — near-black canvas (not pure black), near-white ink,
+/// hairline dividers rather than cards-on-cards, single white CTA. Semantic
+/// accents are brighter than light mode for legibility on a dark background.
 class AppColorsDark {
-  static const Color ink = Color(0xFFF1F5F9);
-  static const Color muted = Color(0xFF94A3B8);
-  static const Color line = Color(0xFF2A3547);
-  static const Color canvas = Color(0xFF0B1220);
-  static const Color surface = Color(0xFF141B2C);
-  static const Color surfaceRaised = Color(0xFF1B2438);
-  static const Color primary = Color(0xFF3B82F6);
-  static const Color primarySoft = Color(0xFF17233D);
-  static const Color success = Color(0xFF22C55E);
+  static const Color ink = Color(0xFFFAFAFA);
+  static const Color muted = Color(0xFF71717A);
+  static const Color line = Color(0xFF1C1C1F);
+  static const Color canvas = Color(0xFF0A0A0B);
+  static const Color surface = Color(0xFF0A0A0B);
+  static const Color surfaceRaised = Color(0xFF141416);
+  static const Color primary = Color(0xFFFAFAFA);
+  static const Color primarySoft = Color(0xFF1C1C1F);
+  static const Color success = Color(0xFF4ADE80);
   static const Color successSoft = Color(0xFF122A1E);
-  static const Color warning = Color(0xFFF59E0B);
-  static const Color warningSoft = Color(0xFF2B2211);
-  static const Color danger = Color(0xFFEF4444);
+  static const Color warning = Color(0xFFFB923C);
+  static const Color warningSoft = Color(0xFF2B1B10);
+  static const Color danger = Color(0xFFF87171);
   static const Color dangerSoft = Color(0xFF2C1618);
 }
 
@@ -61,6 +60,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
   final Color warningSoft;
   final Color danger;
   final Color dangerSoft;
+  final Color onPrimary;
 
   const AppColorsExt({
     required this.ink,
@@ -77,6 +77,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
     required this.warningSoft,
     required this.danger,
     required this.dangerSoft,
+    required this.onPrimary,
   });
 
   static const light = AppColorsExt(
@@ -94,6 +95,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
     warningSoft: AppColors.warningSoft,
     danger: AppColors.danger,
     dangerSoft: AppColors.dangerSoft,
+    onPrimary: Colors.white,
   );
 
   static const dark = AppColorsExt(
@@ -111,6 +113,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
     warningSoft: AppColorsDark.warningSoft,
     danger: AppColorsDark.danger,
     dangerSoft: AppColorsDark.dangerSoft,
+    onPrimary: Color(0xFF0A0A0B),
   );
 
   @override
@@ -129,6 +132,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
     Color? warningSoft,
     Color? danger,
     Color? dangerSoft,
+    Color? onPrimary,
   }) {
     return AppColorsExt(
       ink: ink ?? this.ink,
@@ -145,6 +149,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
       warningSoft: warningSoft ?? this.warningSoft,
       danger: danger ?? this.danger,
       dangerSoft: dangerSoft ?? this.dangerSoft,
+      onPrimary: onPrimary ?? this.onPrimary,
     );
   }
 
@@ -166,6 +171,7 @@ class AppColorsExt extends ThemeExtension<AppColorsExt> {
       warningSoft: Color.lerp(warningSoft, other.warningSoft, t)!,
       danger: Color.lerp(danger, other.danger, t)!,
       dangerSoft: Color.lerp(dangerSoft, other.dangerSoft, t)!,
+      onPrimary: Color.lerp(onPrimary, other.onPrimary, t)!,
     );
   }
 }
@@ -183,22 +189,19 @@ class AppTheme {
     required Brightness brightness,
     required AppColorsExt colors,
   }) {
+    // No custom fontFamily override: '.SF Pro Text' only resolves on iOS
+    // (an unguaranteed private system-font name) and silently falls back to
+    // Roboto on Android, so the two platforms rendered different type
+    // consistently — using each platform's own default is more honest and
+    // matches Material 3's built-in cross-platform type ramp.
     final base = ThemeData(
       colorScheme: ColorScheme.fromSeed(
-        seedColor: colors.primary,
+        seedColor: colors.ink,
         brightness: brightness,
         surface: colors.surface,
       ),
       useMaterial3: true,
-      fontFamily: '.SF Pro Text',
     );
-
-    // No BoxShadow-based elevation in dark mode — shadows are barely
-    // visible on a dark canvas. Card separation is carried by the border
-    // instead, matching Material's tint-based dark elevation convention.
-    final cardBorder = brightness == Brightness.dark
-        ? BorderSide(color: colors.line, width: 1)
-        : BorderSide(color: colors.line);
 
     return base.copyWith(
       extensions: [colors],
@@ -211,8 +214,9 @@ class AppTheme {
         scrolledUnderElevation: 0,
         titleTextStyle: TextStyle(
           color: colors.ink,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.01,
         ),
       ),
       cardTheme: CardThemeData(
@@ -220,16 +224,16 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: cardBorder,
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: colors.line),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: colors.surface,
+        fillColor: colors.surfaceRaised,
         labelStyle: TextStyle(color: colors.muted),
         floatingLabelStyle: TextStyle(
-          color: colors.primary,
+          color: colors.ink,
           fontWeight: FontWeight.w700,
         ),
         contentPadding: const EdgeInsets.symmetric(
@@ -242,7 +246,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: colors.primary, width: 1.4),
+          borderSide: BorderSide(color: colors.ink, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -252,41 +256,64 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: colors.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: colors.onPrimary,
           disabledBackgroundColor: colors.primary.withValues(alpha: 0.35),
           elevation: 0,
           minimumSize: const Size.fromHeight(56),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(56),
+          side: BorderSide(color: colors.line),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: colors.surfaceRaised,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: colors.line),
+        ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: colors.surface,
-        indicatorColor: colors.primarySoft,
+        backgroundColor: colors.canvas,
+        indicatorColor: Colors.transparent,
         elevation: 0,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             color: states.contains(WidgetState.selected)
-                ? colors.primary
+                ? colors.ink
                 : colors.muted,
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
           ),
         ),
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             color: states.contains(WidgetState.selected)
-                ? colors.primary
+                ? colors.ink
                 : colors.muted,
           ),
         ),
+      ),
+      dividerTheme: DividerThemeData(color: colors.line, thickness: 1, space: 1),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? colors.onPrimary : colors.muted,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? colors.primary : colors.line,
+        ),
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
       ),
     );
   }
@@ -311,12 +338,20 @@ class AppPage extends StatelessWidget {
     final colors = context.colors;
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: subtitle == null ? 64 : 82,
+        toolbarHeight: subtitle == null ? 60 : 78,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(title),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.01,
+                color: colors.ink,
+              ),
+            ),
             if (subtitle != null) ...[
               const SizedBox(height: 3),
               Text(
@@ -324,7 +359,7 @@ class AppPage extends StatelessWidget {
                 style: TextStyle(
                   color: colors.muted,
                   fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -350,24 +385,12 @@ class AppSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: colors.line),
-        // Shadows read as nothing on a dark canvas, so elevation there is
-        // carried by the border/surface-tint alone instead.
-        boxShadow: isDark
-            ? null
-            : [
-                BoxShadow(
-                  color: const Color(0xFF101828).withValues(alpha: 0.04),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8),
-                ),
-              ],
       ),
       child: child,
     );
@@ -389,7 +412,7 @@ class StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(999),
@@ -398,15 +421,23 @@ class StatusPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 14, color: color),
+            Icon(icon, size: 12, color: color),
             const SizedBox(width: 5),
+          ] else ...[
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
           ],
           Text(
             label,
             style: TextStyle(
               color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.02,
             ),
           ),
         ],

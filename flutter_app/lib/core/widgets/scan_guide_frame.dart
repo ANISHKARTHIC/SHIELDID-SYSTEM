@@ -140,7 +140,7 @@ class _GuideFramePainter extends CustomPainter {
         end: Alignment.bottomCenter,
         colors: [
           accentColor.withValues(alpha: 0.0),
-          accentColor.withValues(alpha: 0.55),
+          accentColor.withValues(alpha: 0.3),
           accentColor.withValues(alpha: 0.0),
         ],
       ).createShader(Rect.fromLTWH(0, sweepY - 24, size.width, 48));

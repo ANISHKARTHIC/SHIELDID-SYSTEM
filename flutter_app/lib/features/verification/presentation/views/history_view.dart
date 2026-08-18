@@ -70,9 +70,10 @@ class _HistoryViewState extends State<HistoryView> {
         ),
       );
     } else {
-      content = ListView.builder(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      content = ListView.separated(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         itemCount: _history.length,
+        separatorBuilder: (context, index) => Divider(color: colors.line, height: 1),
         itemBuilder: (context, index) {
           final item = _history[index];
           final decision = (item['final_decision'] ?? 'pending').toString();
@@ -81,51 +82,48 @@ class _HistoryViewState extends State<HistoryView> {
 
           DateTime date =
               DateTime.tryParse(item['created_at'] ?? '') ?? DateTime.now();
-          String formattedDate = DateFormat('MMM d, yyyy - HH:mm').format(date);
+          String formattedDate = DateFormat('MMM d, HH:mm').format(date);
 
           return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: AppSurface(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(statusIcon, color: statusColor),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          formattedDate,
-                          style: TextStyle(
-                            color: colors.ink,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                          ),
+                  child: Icon(statusIcon, color: statusColor, size: 18),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        formattedDate,
+                        style: TextStyle(
+                          color: colors.ink,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Session ${item['session_id'].toString().substring(0, 8)}',
-                          style: TextStyle(
-                            color: colors.muted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Session ${item['session_id'].toString().substring(0, 8)}',
+                        style: TextStyle(
+                          color: colors.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  StatusPill(label: decision.toUpperCase(), color: statusColor),
-                ],
-              ),
+                ),
+                StatusPill(label: decision.toUpperCase(), color: statusColor),
+              ],
             ),
           );
         },

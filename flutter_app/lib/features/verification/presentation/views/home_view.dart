@@ -23,12 +23,24 @@ class _HomeViewState extends ConsumerState<HomeView> {
   bool _isConnected = false;
   String? _errorMessage;
   Map<String, dynamic>? _stats;
+  Map<String, dynamic>? _readiness;
 
   @override
   void initState() {
     super.initState();
     if (widget.loadInitialData) {
       _fetchStats();
+      _fetchReadiness();
+    }
+  }
+
+  Future<void> _fetchReadiness() async {
+    try {
+      final remoteData = RemoteDataSource();
+      final readiness = await remoteData.getReadiness();
+      if (mounted) setState(() => _readiness = readiness);
+    } catch (e) {
+      if (mounted) setState(() => _readiness = null);
     }
   }
 
@@ -185,6 +197,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
             .push(AppPageRoute.push(CameraView(sessionId: sessionId)))
             .then((_) {
           _fetchStats(); // Refresh stats when returning
+          _fetchReadiness();
         });
       }
     } on DioException catch (e) {
@@ -217,7 +230,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
 
   Widget _buildDashboard() {
     final colors = context.colors;
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -267,6 +280,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
           GestureDetector(
             onLongPress: _showSettingsDialog,
             child: AppSurface(
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -274,11 +288,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Active Shift',
+                        'ACTIVE SHIFT',
                         style: TextStyle(
                           color: colors.muted,
-                          fontSize: 14,
+                          fontSize: 11,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: 0.06,
                         ),
                       ),
                       StatusPill(
@@ -288,25 +303,25 @@ class _HomeViewState extends ConsumerState<HomeView> {
                         color: _isConnecting
                             ? colors.warning
                             : (_isConnected ? colors.success : colors.danger),
-                        icon: _isConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 14),
                   Text(
                     _stats?["operator_name"] ??
                         (_isConnecting ? "Connecting..." : "Door Staff"),
                     style: TextStyle(
                       color: colors.ink,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.01,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     _isConnected
                         ? 'Connected to verification service.'
-                        : 'Not connected. Long-press this card to configure.',
+                        : 'Not connected. Long-press to configure.',
                     style: TextStyle(
                       color: colors.muted,
                       fontSize: 13,
@@ -317,51 +332,66 @@ class _HomeViewState extends ConsumerState<HomeView> {
               ),
             ),
           ),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _buildStatCard(
-                colors,
-                'Verified',
-                _stats != null ? _stats!["verified"].toString() : '-',
-                colors.primary,
-                Icons.check_circle_outline_rounded,
-              ),
-              _buildStatCard(
-                colors,
-                'Pending',
-                _stats != null ? _stats!["pending"].toString() : '-',
-                colors.warning,
-                Icons.hourglass_empty_rounded,
-              ),
-              _buildStatCard(
-                colors,
-                'Flagged',
-                _stats != null ? _stats!["flagged"].toString() : '-',
-                colors.danger,
-                Icons.warning_amber_rounded,
-              ),
-            ],
+          const SizedBox(height: 16),
+          AppSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
+            child: Row(
+              children: [
+                _buildStatColumn(colors, 'Verified', _stats != null ? _stats!["verified"].toString() : '-', colors.ink, isFirst: true),
+                _buildStatColumn(colors, 'Pending', _stats != null ? _stats!["pending"].toString() : '-', colors.ink),
+                _buildStatColumn(colors, 'Flagged', _stats != null ? _stats!["flagged"].toString() : '-', colors.warning, isLast: true),
+              ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(height: 16),
+          AppSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Column(
+              children: [
+                _buildStatusRow(
+                  colors,
+                  Icons.wifi_rounded,
+                  'Network',
+                  _isConnected ? 'Connected' : 'Offline',
+                  _isConnected ? colors.success : colors.danger,
+                ),
+                Divider(color: colors.line, height: 1),
+                _buildStatusRow(
+                  colors,
+                  Icons.memory_rounded,
+                  'AI Service',
+                  _readiness?['checks']?['ai_service'] == 'ok' ? 'Ready' : 'Unavailable',
+                  _readiness?['checks']?['ai_service'] == 'ok' ? colors.success : colors.muted,
+                ),
+                Divider(color: colors.line, height: 1),
+                _buildStatusRow(
+                  colors,
+                  Icons.sync_rounded,
+                  'Sync',
+                  _isConnected ? 'Up to date' : 'Pending',
+                  colors.ink,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
           ElevatedButton(
             onPressed: _isLoading ? null : _startVerification,
             child: _isLoading
-                ? const SizedBox(
+                ? SizedBox(
                     height: 24,
                     width: 24,
                     child: CircularProgressIndicator(
-                      color: Colors.white,
+                      color: colors.onPrimary,
                       strokeWidth: 3,
                     ),
                   )
-                : const Row(
+                : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.document_scanner_rounded),
-                      SizedBox(width: 10),
-                      Text('Start Verification'),
+                      Icon(Icons.document_scanner_rounded, color: colors.onPrimary),
+                      const SizedBox(width: 10),
+                      Text('Start Verification', style: TextStyle(color: colors.onPrimary)),
                     ],
                   ),
           ),
@@ -370,32 +400,60 @@ class _HomeViewState extends ConsumerState<HomeView> {
     );
   }
 
-  Widget _buildStatCard(
+  Widget _buildStatusRow(
+    AppColorsExt colors,
+    IconData icon,
+    String label,
+    String value,
+    Color valueColor,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 13),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 15, color: colors.muted),
+              const SizedBox(width: 8),
+              Text(label, style: TextStyle(color: colors.muted, fontSize: 13, fontWeight: FontWeight.w500)),
+            ],
+          ),
+          Text(value, style: TextStyle(color: valueColor, fontSize: 13, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatColumn(
     AppColorsExt colors,
     String label,
     String value,
-    Color color,
-    IconData icon,
-  ) {
+    Color valueColor, {
+    bool isFirst = false,
+    bool isLast = false,
+  }) {
     return Expanded(
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
+        padding: EdgeInsets.only(
+          right: isLast ? 0 : 16,
+          left: isFirst ? 0 : 16,
+        ),
         decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: colors.line),
+          border: Border(
+            right: isLast ? BorderSide.none : BorderSide(color: colors.line),
+          ),
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 28),
-            const SizedBox(height: 12),
             Text(
               value,
               style: TextStyle(
-                color: color,
+                color: valueColor,
                 fontSize: 26,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.01,
               ),
             ),
             const SizedBox(height: 4),
@@ -403,8 +461,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
               label,
               style: TextStyle(
                 color: colors.muted,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.02,
               ),
             ),
           ],
@@ -422,7 +481,10 @@ class _HomeViewState extends ConsumerState<HomeView> {
         IconButton(
           tooltip: 'Refresh Status',
           icon: const Icon(Icons.sync_rounded),
-          onPressed: _fetchStats,
+          onPressed: () {
+            _fetchStats();
+            _fetchReadiness();
+          },
         ),
       ],
       child: _buildDashboard(),

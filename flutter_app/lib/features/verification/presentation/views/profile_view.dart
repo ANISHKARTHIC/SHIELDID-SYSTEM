@@ -100,109 +100,126 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
     return AppPage(
       title: 'Profile',
       child: ListView(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         children: [
-          AppSurface(
-            child: Row(
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: colors.primarySoft,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: colors.primary,
-                    size: 28,
-                  ),
+          Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: colors.primarySoft,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _email ?? '—',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: colors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      StatusPill(
-                        label: _formatRole(_role),
-                        color: colors.primary,
-                        icon: Icons.shield_outlined,
-                      ),
-                    ],
-                  ),
+                child: Icon(Icons.person_rounded, color: colors.ink, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _email ?? '—',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: colors.ink),
+                    ),
+                    const SizedBox(height: 4),
+                    StatusPill(label: _formatRole(_role), color: colors.muted),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 28),
+          Divider(color: colors.line, height: 1),
+          const SizedBox(height: 22),
           Text(
             'PREFERENCES',
-            style: TextStyle(color: colors.muted, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+            style: TextStyle(color: colors.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.06),
           ),
-          const SizedBox(height: 10),
-          AppSurface(
-            padding: EdgeInsets.zero,
+          const SizedBox(height: 6),
+          _buildPrefRow(
+            colors,
+            icon: Icons.dark_mode_rounded,
+            title: 'Dark Mode',
+            value: themeMode == ThemeMode.dark,
+            onChanged: (value) {
+              ref.read(themeModeProvider.notifier).setMode(
+                    value ? ThemeMode.dark : ThemeMode.light,
+                  );
+            },
+          ),
+          Divider(color: colors.line, height: 1),
+          _buildPrefRow(
+            colors,
+            icon: Icons.fingerprint_rounded,
+            title: 'Face ID Unlock',
+            subtitle: _checkingBiometric
+                ? null
+                : (_biometricAvailable
+                    ? 'Adds a device-local check'
+                    : 'Unavailable on this device'),
+            value: _biometricEnabled,
+            onChanged: _biometricAvailable ? _toggleBiometric : null,
+          ),
+          const SizedBox(height: 22),
+          Divider(color: colors.line, height: 1),
+          InkWell(
+            onTap: _confirmLogout,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, color: colors.danger, size: 18),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Sign Out',
+                    style: TextStyle(fontWeight: FontWeight.w700, color: colors.danger, fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrefRow(
+    AppColorsExt colors, {
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required bool value,
+    required ValueChanged<bool>? onChanged,
+  }) {
+    final enabled = onChanged != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: enabled ? colors.ink : colors.muted),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SwitchListTile(
-                  secondary: Icon(Icons.dark_mode_rounded, color: colors.ink),
-                  title: Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.w700, color: colors.ink)),
-                  value: themeMode == ThemeMode.dark,
-                  onChanged: (value) {
-                    ref.read(themeModeProvider.notifier).setMode(
-                          value ? ThemeMode.dark : ThemeMode.light,
-                        );
-                  },
-                ),
-                Divider(height: 1, color: colors.line),
-                SwitchListTile(
-                  secondary: Icon(
-                    Icons.fingerprint_rounded,
-                    color: _biometricAvailable ? colors.ink : colors.muted,
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: enabled ? colors.ink : colors.muted,
                   ),
-                  title: Text(
-                    'Require Face ID / Fingerprint to unlock',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: _biometricAvailable ? colors.ink : colors.muted,
-                    ),
-                  ),
-                  subtitle: _checkingBiometric
-                      ? null
-                      : Text(
-                          _biometricAvailable
-                              ? 'Adds a device-local unlock check on top of your account.'
-                              : 'Biometric unlock unavailable on this device.',
-                          style: TextStyle(color: colors.muted, fontSize: 12),
-                        ),
-                  value: _biometricEnabled,
-                  onChanged: _biometricAvailable ? _toggleBiometric : null,
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: TextStyle(color: colors.muted, fontSize: 12)),
+                ],
               ],
             ),
           ),
-          const SizedBox(height: 18),
-          AppSurface(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              leading: Icon(Icons.logout_rounded, color: colors.danger),
-              title: Text(
-                'Sign Out',
-                style: TextStyle(fontWeight: FontWeight.w700, color: colors.danger),
-              ),
-              onTap: _confirmLogout,
-            ),
-          ),
+          Switch(value: value, onChanged: onChanged),
         ],
       ),
     );
