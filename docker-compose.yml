@@ -1,7 +1,7 @@
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: pub_entry_db
+    container_name: venuepass_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -19,7 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: pub_entry_redis
+    container_name: venuepass_redis
     ports:
       - "6379:6379"
     volumes:
@@ -33,7 +33,7 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: pub_entry_minio
+    container_name: venuepass_minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
@@ -67,7 +67,7 @@ services:
     build:
       context: ./ai-service
       dockerfile: Dockerfile
-    container_name: pub_entry_ai_service
+    container_name: venuepass_ai_service
     ports:
       - "8001:8001"
     restart: unless-stopped
@@ -76,7 +76,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: pub_entry_backend
+    container_name: venuepass_backend
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -108,7 +108,7 @@ services:
       dockerfile: frontend/frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
-    container_name: pub_entry_frontend
+    container_name: venuepass_frontend
     depends_on:
       - backend
     ports:

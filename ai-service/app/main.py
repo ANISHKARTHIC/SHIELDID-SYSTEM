@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     pass
 
 app = FastAPI(
-    title="Pub Entry AI Verification Service",
+    title="VenuePass AI Verification Service",
     description="Independent AI Microservice for Document Processing.",
     version="1.0.0",
     lifespan=lifespan

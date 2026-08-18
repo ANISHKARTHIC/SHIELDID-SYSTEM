@@ -27,7 +27,7 @@ class PubEntryApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
-      title: 'Pub Entry Staff',
+      title: 'VenuePass',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
@@ -95,7 +95,7 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     final success = await BiometricAuthService.authenticate(
-      reason: 'Unlock Pub Entry Staff',
+      reason: 'Unlock VenuePass',
     );
 
     if (!mounted) return;

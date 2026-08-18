@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pub_entry_app/core/theme/app_theme.dart';
-import 'package:pub_entry_app/core/widgets/empty_state.dart';
-import 'package:pub_entry_app/core/widgets/verify_step_indicator.dart';
+import 'package:venuepass_app/core/theme/app_theme.dart';
+import 'package:venuepass_app/core/widgets/empty_state.dart';
+import 'package:venuepass_app/core/widgets/verify_step_indicator.dart';
 
 void main() {
   for (final mode in [Brightness.light, Brightness.dark]) {

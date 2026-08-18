@@ -100,7 +100,7 @@ class _LoginViewState extends State<LoginView> {
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'Pub Entry Staff',
+                      'VenuePass',
                       style: TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,

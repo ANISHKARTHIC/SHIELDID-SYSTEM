@@ -1,5 +1,5 @@
-name: pub_entry_app
-description: "Pub Entry Security - Mobile ID Verification & Face Age Scanner"
+name: venuepass_app
+description: "VenuePass - Mobile Venue Identity Verification"
 publish_to: 'none'
 version: 1.0.0+1
 

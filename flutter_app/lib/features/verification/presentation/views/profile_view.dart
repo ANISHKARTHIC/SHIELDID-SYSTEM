@@ -57,7 +57,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   Future<void> _toggleBiometric(bool value) async {
     if (value) {
       final success = await BiometricAuthService.authenticate(
-        reason: 'Confirm biometric unlock for Pub Entry Staff',
+        reason: 'Confirm biometric unlock for VenuePass',
       );
       if (!success) {
         if (mounted) showAppErrorSnackBar(context, 'Could not verify biometrics. Not enabled.');

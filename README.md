@@ -1,6 +1,6 @@
-# 🛡️ Pub Entry Security & ID Verification Pipeline
+# 🛡️ VenuePass — Venue Identity Verification Platform
 
-Welcome to the Pub Entry and ID Verification System. This project provides an automated, high-fidelity security gateway for venues to scan UK Driving Licences, extract visitor details, calculate risk factors, and determine authenticity (Genuine vs. Fake) using advanced spatial parsing and computer vision heuristics.
+Welcome to VenuePass. This project provides an automated, high-fidelity security gateway for venues to scan UK Driving Licences, extract visitor details, calculate risk factors, and determine authenticity (Genuine vs. Fake) using advanced spatial parsing and computer vision heuristics.
 
 ---
 

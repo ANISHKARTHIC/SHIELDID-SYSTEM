@@ -54,7 +54,7 @@ try:
             bootstrap_password = secrets.token_urlsafe(12)
             admin = User(
                 venue_id=venue.id,
-                email="admin@pub-entry.local",
+                email="admin@venuepass.local",
                 hashed_password=get_password_hash(bootstrap_password),
                 role=RoleEnum.super_admin,
                 is_active=True,
@@ -62,7 +62,7 @@ try:
             db.add(admin)
             db.commit()
             logger.warning(
-                f"Bootstrap super_admin created: admin@pub-entry.local / {bootstrap_password} "
+                f"Bootstrap super_admin created: admin@venuepass.local / {bootstrap_password} "
                 "— log in and change this immediately."
             )
     except Exception as se:
@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Pub Entry Verification System API",
+    title="VenuePass Verification System API",
     description="Backend API for AI-assisted identity verification.",
     version="1.0.0",
     lifespan=lifespan,
@@ -133,7 +133,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 def health_check():
     return {
         "status": "ok", 
-        "service": "pub-entry-backend",
+        "service": "venuepass-backend",
         "version": "1.0.0"
     }
 
@@ -189,4 +189,4 @@ def get_metrics():
 
 @app.get("/")
 def read_root():
-    return {"message": "Pub Entry Verification System API is running."}
+    return {"message": "VenuePass Verification System API is running."}

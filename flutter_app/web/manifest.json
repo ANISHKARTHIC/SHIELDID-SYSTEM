@@ -1,6 +1,6 @@
 {
-    "name": "pub_entry_app",
-    "short_name": "pub_entry_app",
+    "name": "VenuePass",
+    "short_name": "VenuePass",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

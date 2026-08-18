@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pub_entry_app/core/theme/app_theme.dart';
-import 'package:pub_entry_app/features/verification/presentation/views/decision_view.dart';
+import 'package:venuepass_app/core/theme/app_theme.dart';
+import 'package:venuepass_app/features/verification/presentation/views/decision_view.dart';
 
 void main() {
   testWidgets('DecisionView shows the fully-revealed end state immediately when reduce-motion is on', (tester) async {
