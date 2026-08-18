@@ -1,10 +1,17 @@
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../config.dart';
+import '../security/token_storage.dart';
+
+/// Callback invoked when the server rejects the stored token (401), so the
+/// app can drop the user back to the login screen instead of surfacing a
+/// confusing raw network error.
+typedef OnSessionExpired = void Function();
 
 class DioClient {
   static final DioClient _instance = DioClient._internal();
   late Dio dio;
+  OnSessionExpired? onSessionExpired;
 
   factory DioClient() {
     return _instance;
@@ -19,6 +26,25 @@ class DioClient {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+        },
+      ),
+    );
+
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await TokenStorage.readToken();
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401) {
+            await TokenStorage.clear();
+            onSessionExpired?.call();
+          }
+          handler.next(error);
         },
       ),
     );

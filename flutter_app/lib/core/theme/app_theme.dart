@@ -1,12 +1,17 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+/// Light-mode palette. Kept as bare static constants for backward
+/// compatibility with screens not yet migrated to [AppColorsX] — new/touched
+/// screens should read colors via `context.colors.xxx` instead, which is
+/// theme-aware (light vs dark).
 class AppColors {
   static const Color ink = Color(0xFF172033);
   static const Color muted = Color(0xFF667085);
   static const Color line = Color(0xFFE4E7EC);
   static const Color canvas = Color(0xFFF8FAFC);
   static const Color surface = Color(0xFFFFFFFF);
+  static const Color surfaceRaised = Color(0xFFF1F4F8);
   static const Color primary = Color(0xFF2563EB);
   static const Color primarySoft = Color(0xFFEFF6FF);
   static const Color success = Color(0xFF039855);
@@ -17,47 +22,214 @@ class AppColors {
   static const Color dangerSoft = Color(0xFFFEF3F2);
 }
 
+/// Dark-mode palette — a deep blue-slate scale rather than pure black/white,
+/// so shadows/elevation still read and text doesn't cause halation. Hues
+/// match the light palette for brand consistency but are brighter/more
+/// saturated where needed for legibility on a dark background.
+class AppColorsDark {
+  static const Color ink = Color(0xFFF1F5F9);
+  static const Color muted = Color(0xFF94A3B8);
+  static const Color line = Color(0xFF2A3547);
+  static const Color canvas = Color(0xFF0B1220);
+  static const Color surface = Color(0xFF141B2C);
+  static const Color surfaceRaised = Color(0xFF1B2438);
+  static const Color primary = Color(0xFF3B82F6);
+  static const Color primarySoft = Color(0xFF17233D);
+  static const Color success = Color(0xFF22C55E);
+  static const Color successSoft = Color(0xFF122A1E);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color warningSoft = Color(0xFF2B2211);
+  static const Color danger = Color(0xFFEF4444);
+  static const Color dangerSoft = Color(0xFF2C1618);
+}
+
+/// Theme-aware color tokens beyond what [ColorScheme] covers (muted/line/
+/// canvas/soft-variants have no direct ColorScheme slot). Registered on both
+/// [ThemeData]s via `extensions:`, read via `context.colors`.
+class AppColorsExt extends ThemeExtension<AppColorsExt> {
+  final Color ink;
+  final Color muted;
+  final Color line;
+  final Color canvas;
+  final Color surface;
+  final Color surfaceRaised;
+  final Color primary;
+  final Color primarySoft;
+  final Color success;
+  final Color successSoft;
+  final Color warning;
+  final Color warningSoft;
+  final Color danger;
+  final Color dangerSoft;
+
+  const AppColorsExt({
+    required this.ink,
+    required this.muted,
+    required this.line,
+    required this.canvas,
+    required this.surface,
+    required this.surfaceRaised,
+    required this.primary,
+    required this.primarySoft,
+    required this.success,
+    required this.successSoft,
+    required this.warning,
+    required this.warningSoft,
+    required this.danger,
+    required this.dangerSoft,
+  });
+
+  static const light = AppColorsExt(
+    ink: AppColors.ink,
+    muted: AppColors.muted,
+    line: AppColors.line,
+    canvas: AppColors.canvas,
+    surface: AppColors.surface,
+    surfaceRaised: AppColors.surfaceRaised,
+    primary: AppColors.primary,
+    primarySoft: AppColors.primarySoft,
+    success: AppColors.success,
+    successSoft: AppColors.successSoft,
+    warning: AppColors.warning,
+    warningSoft: AppColors.warningSoft,
+    danger: AppColors.danger,
+    dangerSoft: AppColors.dangerSoft,
+  );
+
+  static const dark = AppColorsExt(
+    ink: AppColorsDark.ink,
+    muted: AppColorsDark.muted,
+    line: AppColorsDark.line,
+    canvas: AppColorsDark.canvas,
+    surface: AppColorsDark.surface,
+    surfaceRaised: AppColorsDark.surfaceRaised,
+    primary: AppColorsDark.primary,
+    primarySoft: AppColorsDark.primarySoft,
+    success: AppColorsDark.success,
+    successSoft: AppColorsDark.successSoft,
+    warning: AppColorsDark.warning,
+    warningSoft: AppColorsDark.warningSoft,
+    danger: AppColorsDark.danger,
+    dangerSoft: AppColorsDark.dangerSoft,
+  );
+
+  @override
+  AppColorsExt copyWith({
+    Color? ink,
+    Color? muted,
+    Color? line,
+    Color? canvas,
+    Color? surface,
+    Color? surfaceRaised,
+    Color? primary,
+    Color? primarySoft,
+    Color? success,
+    Color? successSoft,
+    Color? warning,
+    Color? warningSoft,
+    Color? danger,
+    Color? dangerSoft,
+  }) {
+    return AppColorsExt(
+      ink: ink ?? this.ink,
+      muted: muted ?? this.muted,
+      line: line ?? this.line,
+      canvas: canvas ?? this.canvas,
+      surface: surface ?? this.surface,
+      surfaceRaised: surfaceRaised ?? this.surfaceRaised,
+      primary: primary ?? this.primary,
+      primarySoft: primarySoft ?? this.primarySoft,
+      success: success ?? this.success,
+      successSoft: successSoft ?? this.successSoft,
+      warning: warning ?? this.warning,
+      warningSoft: warningSoft ?? this.warningSoft,
+      danger: danger ?? this.danger,
+      dangerSoft: dangerSoft ?? this.dangerSoft,
+    );
+  }
+
+  @override
+  AppColorsExt lerp(ThemeExtension<AppColorsExt>? other, double t) {
+    if (other is! AppColorsExt) return this;
+    return AppColorsExt(
+      ink: Color.lerp(ink, other.ink, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      line: Color.lerp(line, other.line, t)!,
+      canvas: Color.lerp(canvas, other.canvas, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      surfaceRaised: Color.lerp(surfaceRaised, other.surfaceRaised, t)!,
+      primary: Color.lerp(primary, other.primary, t)!,
+      primarySoft: Color.lerp(primarySoft, other.primarySoft, t)!,
+      success: Color.lerp(success, other.success, t)!,
+      successSoft: Color.lerp(successSoft, other.successSoft, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
+      warningSoft: Color.lerp(warningSoft, other.warningSoft, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+      dangerSoft: Color.lerp(dangerSoft, other.dangerSoft, t)!,
+    );
+  }
+}
+
+extension AppColorsX on BuildContext {
+  AppColorsExt get colors =>
+      Theme.of(this).extension<AppColorsExt>() ?? AppColorsExt.light;
+}
+
 class AppTheme {
-  static ThemeData light() {
+  static ThemeData light() => _build(brightness: Brightness.light, colors: AppColorsExt.light);
+  static ThemeData dark() => _build(brightness: Brightness.dark, colors: AppColorsExt.dark);
+
+  static ThemeData _build({
+    required Brightness brightness,
+    required AppColorsExt colors,
+  }) {
     final base = ThemeData(
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.primary,
-        brightness: Brightness.light,
-        surface: AppColors.surface,
+        seedColor: colors.primary,
+        brightness: brightness,
+        surface: colors.surface,
       ),
       useMaterial3: true,
       fontFamily: '.SF Pro Text',
     );
 
+    // No BoxShadow-based elevation in dark mode — shadows are barely
+    // visible on a dark canvas. Card separation is carried by the border
+    // instead, matching Material's tint-based dark elevation convention.
+    final cardBorder = brightness == Brightness.dark
+        ? BorderSide(color: colors.line, width: 1)
+        : BorderSide(color: colors.line);
+
     return base.copyWith(
-      scaffoldBackgroundColor: AppColors.canvas,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.canvas,
-        foregroundColor: AppColors.ink,
+      extensions: [colors],
+      scaffoldBackgroundColor: colors.canvas,
+      appBarTheme: AppBarTheme(
+        backgroundColor: colors.canvas,
+        foregroundColor: colors.ink,
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
         titleTextStyle: TextStyle(
-          color: AppColors.ink,
+          color: colors.ink,
           fontSize: 22,
           fontWeight: FontWeight.w800,
         ),
       ),
       cardTheme: CardThemeData(
-        color: AppColors.surface,
+        color: colors.surface,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: const BorderSide(color: AppColors.line),
+          side: cardBorder,
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.surface,
-        labelStyle: const TextStyle(color: AppColors.muted),
-        floatingLabelStyle: const TextStyle(
-          color: AppColors.primary,
+        fillColor: colors.surface,
+        labelStyle: TextStyle(color: colors.muted),
+        floatingLabelStyle: TextStyle(
+          color: colors.primary,
           fontWeight: FontWeight.w700,
         ),
         contentPadding: const EdgeInsets.symmetric(
@@ -66,22 +238,22 @@ class AppTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.line),
+          borderSide: BorderSide(color: colors.line),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+          borderSide: BorderSide(color: colors.primary, width: 1.4),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppColors.danger),
+          borderSide: BorderSide(color: colors.danger),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
+          backgroundColor: colors.primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.35),
+          disabledBackgroundColor: colors.primary.withValues(alpha: 0.35),
           elevation: 0,
           minimumSize: const Size.fromHeight(56),
           shape: RoundedRectangleBorder(
@@ -91,18 +263,19 @@ class AppTheme {
         ),
       ),
       snackBarTheme: SnackBarThemeData(
+        backgroundColor: colors.surfaceRaised,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.primarySoft,
+        backgroundColor: colors.surface,
+        indicatorColor: colors.primarySoft,
         elevation: 0,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             color: states.contains(WidgetState.selected)
-                ? AppColors.primary
-                : AppColors.muted,
+                ? colors.primary
+                : colors.muted,
             fontSize: 12,
             fontWeight: FontWeight.w700,
           ),
@@ -110,8 +283,8 @@ class AppTheme {
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
             color: states.contains(WidgetState.selected)
-                ? AppColors.primary
-                : AppColors.muted,
+                ? colors.primary
+                : colors.muted,
           ),
         ),
       ),
@@ -135,6 +308,7 @@ class AppPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: subtitle == null ? 64 : 82,
@@ -147,8 +321,8 @@ class AppPage extends StatelessWidget {
               const SizedBox(height: 3),
               Text(
                 subtitle!,
-                style: const TextStyle(
-                  color: AppColors.muted,
+                style: TextStyle(
+                  color: colors.muted,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -175,19 +349,25 @@ class AppSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.line),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF101828).withValues(alpha: 0.04),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        border: Border.all(color: colors.line),
+        // Shadows read as nothing on a dark canvas, so elevation there is
+        // carried by the border/surface-tint alone instead.
+        boxShadow: isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: const Color(0xFF101828).withValues(alpha: 0.04),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
       ),
       child: child,
     );

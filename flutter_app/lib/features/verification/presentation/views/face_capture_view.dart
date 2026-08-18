@@ -3,6 +3,8 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import 'decision_view.dart';
 import '../../data/datasources/remote_data_source.dart';
+import '../../../../core/widgets/camera_scaffold.dart';
+import '../../../../core/navigation/app_page_route.dart';
 
 class FaceCaptureView extends StatefulWidget {
   final String sessionId;
@@ -32,9 +34,11 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
 
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
-    if (cameras.isEmpty) return;
+    if (cameras.isEmpty) {
+      if (mounted) setState(() => _error = 'No camera is available on this device.');
+      return;
+    }
 
-    // Try to find front camera
     CameraDescription? frontCamera;
     for (var camera in cameras) {
       if (camera.lensDirection == CameraLensDirection.front) {
@@ -42,8 +46,6 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
         break;
       }
     }
-
-    // Fallback to first camera if front not found
     frontCamera ??= cameras.first;
 
     _controller = CameraController(
@@ -56,7 +58,7 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       await _controller!.initialize();
       if (mounted) setState(() => _isCameraInitialized = true);
     } catch (e) {
-      debugPrint('Error initializing camera: $e');
+      if (mounted) setState(() => _error = 'Could not start the camera. Please try again.');
     }
   }
 
@@ -80,29 +82,30 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       if (result['success'] == true) {
         final decision = (result['decision'] ?? 'CHECK').toString();
         final venueCheck = result['venue_check'] as Map<String, dynamic>? ?? {};
-        final isBlocked = decision == 'BLOCKED';
-        final isCheck = decision == 'CHECK';
-        final riskScore = isBlocked
-            ? 1.0
-            : isCheck
-            ? 0.65
-            : 0.18;
-        final reason = isBlocked
-            ? 'Visitor has an active venue restriction.'
-            : isCheck
-            ? 'Document details need supervisor review.'
-            : 'Face image captured and no venue restriction was found.';
+        final isBlacklisted = venueCheck['blacklisted'] == true;
+        final incidentCount = (venueCheck['incidents'] as num?)?.toInt() ?? 0;
+
+        // Only real, backend-sourced signals are shown — no fabricated
+        // confidence numbers or hand-authored explanation text. The
+        // response shape today doesn't include a numeric risk score (see
+        // TODO in decision_view.dart), so riskScore is left null.
+        final String reason;
+        if (isBlacklisted) {
+          reason = 'Visitor has an active venue restriction.';
+        } else if (decision == 'CHECK') {
+          reason = 'Document details need supervisor review.';
+        } else {
+          reason = 'Face captured and no venue restriction was found.';
+        }
 
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => DecisionView(
+          Navigator.of(context).push(
+            AppPageRoute.push(
+              DecisionView(
                 decision: decision,
-                riskScore: riskScore,
-                reason: venueCheck['blacklisted'] == true
-                    ? 'Visitor has an active venue restriction.'
-                    : reason,
+                reason: reason,
+                isBlacklisted: isBlacklisted,
+                incidentCount: incidentCount,
                 sessionId: widget.sessionId,
                 ocrData: widget.ocrData,
               ),
@@ -118,7 +121,7 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.toString();
+          _error = 'Could not verify identity. Please try again.';
           _isProcessing = false;
         });
       }
@@ -126,12 +129,12 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
   }
 
   Future<void> _takePicture() async {
-    if (!_controller!.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
     try {
       final image = await _controller!.takePicture();
       await _processFaceImage(image.path);
     } catch (e) {
-      debugPrint('Error taking picture: $e');
+      if (mounted) setState(() => _error = 'Could not capture photo. Please try again.');
     }
   }
 
@@ -145,143 +148,22 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isCameraInitialized) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          CameraPreview(_controller!),
-
-          // Guide Frame Overlay
-          ColorFiltered(
-            colorFilter: ColorFilter.mode(
-              Colors.black.withValues(alpha: 0.6),
-              BlendMode.srcOut,
-            ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black,
-                    backgroundBlendMode: BlendMode.dstOut,
-                  ),
-                ),
-                Center(
-                  child: Container(
-                    width: MediaQuery.of(context).size.width * 0.7,
-                    height: MediaQuery.of(context).size.width * 0.9,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(
-                        200,
-                      ), // Oval shape for face
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Instructions
-          Positioned(
-            top: 100,
-            left: 0,
-            right: 0,
-            child: Column(
-              children: [
-                const Text(
-                  "Position face inside the oval",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.redAccent,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // Bottom Controls
-          if (!_isProcessing)
-            Positioned(
-              bottom: 60,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  const SizedBox(width: 60),
-                  GestureDetector(
-                    onTap: _takePicture,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 4),
-                        color: Colors.white.withValues(alpha: 0.3),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: _pickImage,
-                    icon: const Icon(
-                      Icons.photo_library,
-                      color: Colors.white,
-                      size: 36,
-                    ),
-                    tooltip: 'Upload from Gallery',
-                  ),
-                ],
-              ),
-            ),
-
-          if (_isProcessing)
-            Container(
-              color: Colors.black54,
-              child: const Center(
-                child: CircularProgressIndicator(color: Colors.blueAccent),
-              ),
-            ),
-
-          // Back Button
-          if (!_isProcessing)
-            Positioned(
-              top: 50,
-              left: 20,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.arrow_back,
-                  color: Colors.white,
-                  size: 32,
-                ),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-        ],
-      ),
+    return CameraCaptureScaffold(
+      controller: _controller,
+      isInitializing: !_isCameraInitialized,
+      isOvalGuide: true,
+      guideWidthFactor: 0.7,
+      guideHeightFactor: 0.9,
+      instructionText: 'Position face inside the frame',
+      errorText: _error,
+      currentStep: 3,
+      totalSteps: 3,
+      stepLabel: 'Face Verification',
+      onCapture: _takePicture,
+      onPickFromGallery: _pickImage,
+      onClose: () => Navigator.pop(context),
+      isProcessing: _isProcessing,
+      processingStatusText: 'Verifying identity…',
     );
   }
 }

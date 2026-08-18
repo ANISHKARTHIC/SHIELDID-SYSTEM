@@ -4,6 +4,14 @@ import '../../../../core/network/dio_client.dart';
 class RemoteDataSource {
   final Dio _dio = DioClient().dio;
 
+  Future<Map<String, dynamic>> login(String email, String password) async {
+    final response = await _dio.post(
+      '/auth/login',
+      data: {'username': email, 'password': password},
+    );
+    return response.data;
+  }
+
   Future<String> startSession() async {
     final response = await _dio.post('/session/start');
     return response.data['session_id'];

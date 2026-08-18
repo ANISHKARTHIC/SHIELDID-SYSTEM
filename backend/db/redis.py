@@ -45,11 +45,20 @@ class InMemoryRedis:
 _in_memory_redis = InMemoryRedis()
 
 def get_redis():
+    # Determine which client to hand out before yielding, so an exception
+    # raised downstream by the route handler (e.g. a validation HTTPException)
+    # is thrown back into this generator at most once. A try/except around
+    # the yield itself would catch that downstream throw and attempt a
+    # second yield, which Python forbids for single-yield generators used as
+    # FastAPI dependencies ("generator didn't stop after throw()").
     try:
         client = redis.from_url(settings.REDIS_URL, decode_responses=True)
         client.ping()
-        yield client
-        client.close()
     except Exception:
-        yield _in_memory_redis
+        client = _in_memory_redis
+
+    yield client
+
+    if client is not _in_memory_redis:
+        client.close()
 

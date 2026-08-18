@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/empty_state.dart';
 
 class NotificationsView extends StatefulWidget {
   const NotificationsView({super.key});
@@ -29,6 +30,7 @@ class _NotificationsViewState extends State<NotificationsView> {
         setState(() {
           _notifications = notifications;
           _isLoading = false;
+          _error = null;
         });
       }
     } catch (e) {
@@ -41,24 +43,45 @@ class _NotificationsViewState extends State<NotificationsView> {
     }
   }
 
+  Widget _scrollableEmptyState(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     Widget content;
     if (_isLoading) {
-      content = const Center(child: CircularProgressIndicator());
+      content = _scrollableEmptyState(
+        const Center(child: CircularProgressIndicator()),
+      );
     } else if (_error != null) {
-      content = _EmptyState(
-        icon: Icons.error_outline_rounded,
-        title: 'Alerts unavailable',
-        message: _error!,
-        color: AppColors.danger,
+      content = _scrollableEmptyState(
+        EmptyState(
+          icon: Icons.error_outline_rounded,
+          title: 'Alerts unavailable',
+          message: _error!,
+          color: colors.danger,
+        ),
       );
     } else if (_notifications.isEmpty) {
-      content = const _EmptyState(
-        icon: Icons.notifications_none_rounded,
-        title: 'No new alerts',
-        message: 'Flagged sessions and supervisor messages will appear here.',
-        color: AppColors.primary,
+      content = _scrollableEmptyState(
+        EmptyState(
+          icon: Icons.notifications_none_rounded,
+          title: 'No new alerts',
+          message: 'Flagged sessions and supervisor messages will appear here.',
+          color: colors.primary,
+        ),
       );
     } else {
       content = ListView.builder(
@@ -67,7 +90,8 @@ class _NotificationsViewState extends State<NotificationsView> {
         itemBuilder: (context, index) {
           final notif = _notifications[index];
           final isAlert = notif['type'] == 'ALERT';
-          final color = isAlert ? AppColors.danger : AppColors.primary;
+          final isUnread = notif['is_read'] == false;
+          final color = isAlert ? colors.danger : colors.primary;
 
           DateTime date =
               DateTime.tryParse(notif['created_at'] ?? '') ?? DateTime.now();
@@ -100,12 +124,14 @@ class _NotificationsViewState extends State<NotificationsView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          notif['message'] ?? 'Unknown alert',
-                          style: const TextStyle(
-                            color: AppColors.ink,
+                          (notif['message'] as String?)?.trim().isNotEmpty == true
+                              ? notif['message']
+                              : 'Alert',
+                          style: TextStyle(
+                            color: colors.ink,
                             fontSize: 16,
                             height: 1.25,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: isUnread ? FontWeight.w900 : FontWeight.w700,
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -117,6 +143,16 @@ class _NotificationsViewState extends State<NotificationsView> {
                       ],
                     ),
                   ),
+                  if (isUnread)
+                    Container(
+                      width: 8,
+                      height: 8,
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -137,63 +173,9 @@ class _NotificationsViewState extends State<NotificationsView> {
           },
         ),
       ],
-      child: content,
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String message;
-  final Color color;
-
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.message,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(icon, color: color, size: 30),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.muted,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+      child: RefreshIndicator(
+        onRefresh: _fetchNotifications,
+        child: content,
       ),
     );
   }

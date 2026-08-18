@@ -5,6 +5,8 @@ import 'camera_view.dart';
 import 'package:dio/dio.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/navigation/app_page_route.dart';
+import '../../../../core/widgets/app_snackbar.dart';
 
 class HomeView extends ConsumerStatefulWidget {
   final bool loadInitialData;
@@ -43,12 +45,15 @@ class _HomeViewState extends ConsumerState<HomeView> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final colors = context.colors;
             return AlertDialog(
-              title: const Row(
+              backgroundColor: colors.surface,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
                 children: [
-                  Icon(Icons.dns_rounded, color: AppColors.primary),
-                  SizedBox(width: 10),
-                  Text('Server Configuration'),
+                  Icon(Icons.dns_rounded, color: colors.primary),
+                  const SizedBox(width: 10),
+                  const Text('Server Configuration'),
                 ],
               ),
               content: SingleChildScrollView(
@@ -56,53 +61,16 @@ class _HomeViewState extends ConsumerState<HomeView> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      'Select a preset or enter your backend server URL:',
-                      style: TextStyle(color: AppColors.muted, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        ActionChip(
-                          avatar: const Icon(Icons.smartphone_rounded, size: 16),
-                          label: const Text('Physical Device (192.168.1.55)'),
-                          onPressed: () {
-                            setDialogState(() {
-                              controller.text = 'http://192.168.1.55:8000/api/v1';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                        ActionChip(
-                          avatar: const Icon(Icons.phone_android, size: 16),
-                          label: const Text('Emulator (10.0.2.2)'),
-                          onPressed: () {
-                            setDialogState(() {
-                              controller.text = 'http://10.0.2.2:8000/api/v1';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                        ActionChip(
-                          avatar: const Icon(Icons.laptop, size: 16),
-                          label: const Text('Localhost (127.0.0.1)'),
-                          onPressed: () {
-                            setDialogState(() {
-                              controller.text = 'http://127.0.0.1:8000/api/v1';
-                              testResult = null;
-                            });
-                          },
-                        ),
-                      ],
+                    Text(
+                      'Enter the backend server address for this venue:',
+                      style: TextStyle(color: colors.muted, fontSize: 13),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: controller,
                       decoration: const InputDecoration(
                         labelText: 'API Base URL',
-                        hintText: 'http://<your-ip>:8000/api/v1',
+                        hintText: 'http://<server-address>:8000/api/v1',
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.link_rounded),
                       ),
@@ -142,9 +110,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
                       Text(
                         testResult!,
                         style: TextStyle(
-                          color: testSuccess == true
-                              ? AppColors.success
-                              : AppColors.danger,
+                          color: testSuccess == true ? colors.success : colors.danger,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -166,12 +132,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
                       if (!dialogContext.mounted) return;
                       Navigator.pop(dialogContext);
                       if (mounted) {
-                        ScaffoldMessenger.of(this.context).showSnackBar(
-                          SnackBar(
-                            content: Text('Server URL set to: $url'),
-                            backgroundColor: AppColors.success,
-                          ),
-                        );
+                        showAppSuccessSnackBar(this.context, 'Server address updated');
                         _fetchStats();
                       }
                     }
@@ -207,8 +168,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
         setState(() {
           _isConnected = false;
           _isConnecting = false;
-          _errorMessage =
-              'Could not connect to ${DioClient().dio.options.baseUrl}';
+          _errorMessage = 'Unable to reach the verification service.';
         });
       }
     }
@@ -221,28 +181,26 @@ class _HomeViewState extends ConsumerState<HomeView> {
       final sessionId = await remoteData.startSession();
 
       if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => CameraView(sessionId: sessionId)),
-        ).then((_) {
+        Navigator.of(context)
+            .push(AppPageRoute.push(CameraView(sessionId: sessionId)))
+            .then((_) {
           _fetchStats(); // Refresh stats when returning
         });
       }
     } on DioException catch (e) {
       if (mounted) {
-        String errorMsg = "Network Error: Could not connect to backend.";
+        String errorMsg = "Could not connect to the verification service.";
         if (e.type == DioExceptionType.connectionTimeout) {
-          errorMsg =
-              "Connection Timed Out. Please check your server IP in Settings.";
+          errorMsg = "Connection timed out. Check the server configuration.";
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMsg),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: context.colors.dangerSoft,
             behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
               label: 'Configure',
-              textColor: Colors.white,
+              textColor: context.colors.primary,
               onPressed: _showSettingsDialog,
             ),
           ),
@@ -250,13 +208,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showAppErrorSnackBar(context, 'Something went wrong. Please try again.');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -264,6 +216,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
   }
 
   Widget _buildDashboard() {
+    final colors = context.colors;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Column(
@@ -274,32 +227,29 @@ class _HomeViewState extends ConsumerState<HomeView> {
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.08),
+                color: colors.danger.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.danger.withOpacity(0.3)),
+                border: Border.all(color: colors.danger.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.cloud_off_rounded, color: AppColors.danger),
+                  Icon(Icons.cloud_off_rounded, color: colors.danger),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Backend Offline / Unreachable',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: AppColors.danger,
+                            color: colors.danger,
                             fontSize: 13,
                           ),
                         ),
                         Text(
                           _errorMessage!,
-                          style: const TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 11,
-                          ),
+                          style: TextStyle(color: colors.muted, fontSize: 11),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -308,67 +258,63 @@ class _HomeViewState extends ConsumerState<HomeView> {
                   ),
                   TextButton(
                     onPressed: _showSettingsDialog,
-                    child: const Text('Fix IP'),
+                    child: const Text('Fix'),
                   ),
                 ],
               ),
             ),
           ],
-          AppSurface(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Active Shift',
-                      style: TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+          GestureDetector(
+            onLongPress: _showSettingsDialog,
+            child: AppSurface(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Active Shift',
+                        style: TextStyle(
+                          color: colors.muted,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                    GestureDetector(
-                      onTap: _showSettingsDialog,
-                      child: StatusPill(
+                      StatusPill(
                         label: _isConnecting
                             ? 'CHECKING'
                             : (_isConnected ? 'ONLINE' : 'OFFLINE'),
                         color: _isConnecting
-                            ? AppColors.warning
-                            : (_isConnected
-                                ? AppColors.success
-                                : AppColors.danger),
-                        icon: _isConnected
-                            ? Icons.wifi_rounded
-                            : Icons.wifi_off_rounded,
+                            ? colors.warning
+                            : (_isConnected ? colors.success : colors.danger),
+                        icon: _isConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _stats?["operator_name"] ??
+                        (_isConnecting ? "Connecting..." : "Door Staff"),
+                    style: TextStyle(
+                      color: colors.ink,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _stats?["operator_name"] ??
-                      (_isConnecting ? "Connecting..." : "Door Staff"),
-                  style: const TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _isConnected
-                      ? 'Connected to ${DioClient().dio.options.baseUrl}'
-                      : 'Tap server icon above to configure backend address.',
-                  style: const TextStyle(
-                    color: AppColors.muted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                  const SizedBox(height: 8),
+                  Text(
+                    _isConnected
+                        ? 'Connected to verification service.'
+                        : 'Not connected. Long-press this card to configure.',
+                    style: TextStyle(
+                      color: colors.muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 18),
@@ -376,21 +322,24 @@ class _HomeViewState extends ConsumerState<HomeView> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               _buildStatCard(
+                colors,
                 'Verified',
                 _stats != null ? _stats!["verified"].toString() : '-',
-                AppColors.primary,
+                colors.primary,
                 Icons.check_circle_outline_rounded,
               ),
               _buildStatCard(
+                colors,
                 'Pending',
                 _stats != null ? _stats!["pending"].toString() : '-',
-                AppColors.warning,
+                colors.warning,
                 Icons.hourglass_empty_rounded,
               ),
               _buildStatCard(
+                colors,
                 'Flagged',
                 _stats != null ? _stats!["flagged"].toString() : '-',
-                AppColors.danger,
+                colors.danger,
                 Icons.warning_amber_rounded,
               ),
             ],
@@ -422,6 +371,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
   }
 
   Widget _buildStatCard(
+    AppColorsExt colors,
     String label,
     String value,
     Color color,
@@ -432,9 +382,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
         margin: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: colors.surface,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.line),
+          border: Border.all(color: colors.line),
         ),
         child: Column(
           children: [
@@ -451,8 +401,8 @@ class _HomeViewState extends ConsumerState<HomeView> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: const TextStyle(
-                color: AppColors.muted,
+              style: TextStyle(
+                color: colors.muted,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -469,11 +419,6 @@ class _HomeViewState extends ConsumerState<HomeView> {
       title: 'Security Portal',
       subtitle: 'Door team verification',
       actions: [
-        IconButton(
-          tooltip: 'Configure Backend Server IP',
-          icon: const Icon(Icons.settings_outlined),
-          onPressed: _showSettingsDialog,
-        ),
         IconButton(
           tooltip: 'Refresh Status',
           icon: const Icon(Icons.sync_rounded),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/empty_state.dart';
 
 class HistoryView extends StatefulWidget {
   const HistoryView({super.key});
@@ -29,6 +30,7 @@ class _HistoryViewState extends State<HistoryView> {
         setState(() {
           _history = history;
           _isLoading = false;
+          _error = null;
         });
       }
     } catch (e) {
@@ -43,22 +45,29 @@ class _HistoryViewState extends State<HistoryView> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.colors;
     Widget content;
     if (_isLoading) {
-      content = const Center(child: CircularProgressIndicator());
+      content = _scrollableEmptyState(
+        const Center(child: CircularProgressIndicator()),
+      );
     } else if (_error != null) {
-      content = _EmptyState(
-        icon: Icons.error_outline_rounded,
-        title: 'History unavailable',
-        message: _error!,
-        color: AppColors.danger,
+      content = _scrollableEmptyState(
+        EmptyState(
+          icon: Icons.error_outline_rounded,
+          title: 'History unavailable',
+          message: _error!,
+          color: colors.danger,
+        ),
       );
     } else if (_history.isEmpty) {
-      content = const _EmptyState(
-        icon: Icons.history_rounded,
-        title: 'No checks yet',
-        message: 'Completed verifications will appear here.',
-        color: AppColors.primary,
+      content = _scrollableEmptyState(
+        EmptyState(
+          icon: Icons.history_rounded,
+          title: 'No checks yet',
+          message: 'Completed verifications will appear here.',
+          color: colors.primary,
+        ),
       );
     } else {
       content = ListView.builder(
@@ -67,8 +76,8 @@ class _HistoryViewState extends State<HistoryView> {
         itemBuilder: (context, index) {
           final item = _history[index];
           final decision = (item['final_decision'] ?? 'pending').toString();
-          final isPass = decision == 'pass';
-          final statusColor = isPass ? AppColors.success : AppColors.danger;
+          final statusColor = _statusColor(decision, colors);
+          final statusIcon = _statusIcon(decision);
 
           DateTime date =
               DateTime.tryParse(item['created_at'] ?? '') ?? DateTime.now();
@@ -87,12 +96,7 @@ class _HistoryViewState extends State<HistoryView> {
                       color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Icon(
-                      isPass
-                          ? Icons.check_rounded
-                          : Icons.warning_amber_rounded,
-                      color: statusColor,
-                    ),
+                    child: Icon(statusIcon, color: statusColor),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -100,19 +104,19 @@ class _HistoryViewState extends State<HistoryView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Session ${item['session_id'].toString().substring(0, 8)}',
-                          style: const TextStyle(
-                            color: AppColors.ink,
+                          formattedDate,
+                          style: TextStyle(
+                            color: colors.ink,
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          formattedDate,
-                          style: const TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 13,
+                          'Session ${item['session_id'].toString().substring(0, 8)}',
+                          style: TextStyle(
+                            color: colors.muted,
+                            fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -140,64 +144,54 @@ class _HistoryViewState extends State<HistoryView> {
           },
         ),
       ],
-      child: content,
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String message;
-  final Color color;
-
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.message,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(icon, color: color, size: 30),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontSize: 20,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.muted,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+      child: RefreshIndicator(
+        onRefresh: _fetchHistory,
+        child: content,
       ),
     );
+  }
+
+  Widget _scrollableEmptyState(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Color _statusColor(String decision, AppColorsExt colors) {
+    switch (decision) {
+      case 'pass':
+        return colors.success;
+      case 'check':
+        return colors.warning;
+      case 'deny':
+      case 'block':
+      case 'blocked':
+        return colors.danger;
+      default:
+        return colors.muted;
+    }
+  }
+
+  IconData _statusIcon(String decision) {
+    switch (decision) {
+      case 'pass':
+        return Icons.check_rounded;
+      case 'check':
+        return Icons.help_outline_rounded;
+      case 'deny':
+      case 'block':
+      case 'blocked':
+        return Icons.block_rounded;
+      default:
+        return Icons.schedule_rounded;
+    }
   }
 }

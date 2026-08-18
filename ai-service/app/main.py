@@ -160,7 +160,12 @@ async def extract_ocr_endpoint(file: UploadFile = File(...), document_type: str 
     from app.services.ocr.factory import get_ocr_provider
     ocr_provider = get_ocr_provider()
 
-    ocr_result = ocr_provider.extract_text(contents, document_type)
+    try:
+        ocr_result = ocr_provider.extract_text(contents, document_type)
+    except ValueError as e:
+        # No legible text (out of focus, glare, wrong document, etc.) is an
+        # expected user-recoverable outcome, not a server error.
+        return JSONResponse(status_code=422, content={"success": False, "message": str(e)})
 
     from app.services.data_validation import validate_extracted_data
     validation = validate_extracted_data(ocr_result)

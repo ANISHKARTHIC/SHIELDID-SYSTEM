@@ -81,8 +81,13 @@ async def classify_document(
     # Call AI Service
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
-        response = await client.post(f"{AI_SERVICE_URL}/classify", files=files, timeout=10.0)
-        
+        try:
+            response = await client.post(f"{AI_SERVICE_URL}/classify", files=files, timeout=20.0)
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=503, detail="Document classification is taking too long. Please try again.")
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="Unable to connect to the verification service. Please try again shortly.")
+
         if response.status_code == 200:
             result = response.json()
             if not result.get("is_valid"):
@@ -117,7 +122,12 @@ async def extract_ocr(
     document_type = session_data.get("classification", {}).get("document_type", "uk_driving_licence")
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
-        response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=10.0)
+        try:
+            response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=30.0)
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=503, detail="Text extraction is taking too long. Please try again.")
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="Unable to connect to the verification service. Please try again shortly.")
 
         if response.status_code == 200:
             result = response.json()
@@ -134,6 +144,8 @@ async def extract_ocr(
                 pass # Ignoring errors for now
             
             return result
+        elif response.status_code == 422:
+            raise HTTPException(status_code=422, detail=response.json().get("message", "No legible text could be extracted from the document."))
         else:
             raise HTTPException(status_code=500, detail="OCR extraction failed")
 
@@ -176,12 +188,17 @@ async def face_match(
     customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
     reference_embedding = None
     if customer is not None and customer.face_embedding is not None:
-        reference_embedding = json.dumps(list(customer.face_embedding))
+        reference_embedding = json.dumps([float(x) for x in customer.face_embedding])
 
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         data = {'reference_embedding': reference_embedding} if reference_embedding else {}
-        response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=15.0)
+        try:
+            response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=20.0)
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=503, detail="Face verification is taking too long. Please try again.")
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="Unable to connect to the verification service. Please try again shortly.")
 
         if response.status_code == 200:
             result = response.json()

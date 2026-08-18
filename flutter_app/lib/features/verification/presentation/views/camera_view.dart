@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import 'ocr_review_view.dart';
+import '../../../../core/widgets/camera_scaffold.dart';
+import '../../../../core/navigation/app_page_route.dart';
 
 class CameraView extends StatefulWidget {
   final String sessionId;
@@ -14,6 +16,7 @@ class CameraView extends StatefulWidget {
 class _CameraViewState extends State<CameraView> {
   CameraController? _controller;
   bool _isCameraInitialized = false;
+  String? _error;
 
   @override
   void initState() {
@@ -23,7 +26,10 @@ class _CameraViewState extends State<CameraView> {
 
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
-    if (cameras.isEmpty) return;
+    if (cameras.isEmpty) {
+      if (mounted) setState(() => _error = 'No camera is available on this device.');
+      return;
+    }
 
     _controller = CameraController(
       cameras.first,
@@ -39,7 +45,7 @@ class _CameraViewState extends State<CameraView> {
         });
       }
     } catch (e) {
-      debugPrint('Error initializing camera: $e');
+      if (mounted) setState(() => _error = 'Could not start the camera. Please try again.');
     }
   }
 
@@ -50,13 +56,13 @@ class _CameraViewState extends State<CameraView> {
   }
 
   Future<void> _takePicture() async {
-    if (!_controller!.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized) return;
 
     try {
       final image = await _controller!.takePicture();
       _navigateToReview(image.path);
     } catch (e) {
-      // Handle camera exception
+      if (mounted) setState(() => _error = 'Could not capture photo. Please try again.');
     }
   }
 
@@ -71,11 +77,9 @@ class _CameraViewState extends State<CameraView> {
 
   void _navigateToReview(String path) {
     if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) =>
-              OCRReviewView(imagePath: path, sessionId: widget.sessionId),
+      Navigator.of(context).push(
+        AppPageRoute.push(
+          OCRReviewView(imagePath: path, sessionId: widget.sessionId),
         ),
       );
     }
@@ -83,115 +87,17 @@ class _CameraViewState extends State<CameraView> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isCameraInitialized) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          CameraPreview(_controller!),
-
-          // Guide Frame Overlay
-          ColorFiltered(
-            colorFilter: ColorFilter.mode(
-              Colors.black.withValues(alpha: 0.6),
-              BlendMode.srcOut,
-            ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black,
-                    backgroundBlendMode: BlendMode.dstOut,
-                  ),
-                ),
-                Center(
-                  child: Container(
-                    width: MediaQuery.of(context).size.width * 0.85,
-                    height: MediaQuery.of(context).size.width * 0.55,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Instructions
-          Positioned(
-            top: 100,
-            left: 0,
-            right: 0,
-            child: const Text(
-              "Align Identity Document inside the frame",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-
-          // Bottom Controls
-          Positioned(
-            bottom: 60,
-            left: 0,
-            right: 0,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                // Spacer for symmetry
-                const SizedBox(width: 60),
-
-                // Capture Button
-                GestureDetector(
-                  onTap: _takePicture,
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                      color: Colors.white.withValues(alpha: 0.3),
-                    ),
-                  ),
-                ),
-
-                // Upload Button
-                IconButton(
-                  onPressed: _pickImage,
-                  icon: const Icon(
-                    Icons.photo_library,
-                    color: Colors.white,
-                    size: 36,
-                  ),
-                  tooltip: 'Upload from Gallery',
-                ),
-              ],
-            ),
-          ),
-
-          // Back Button
-          Positioned(
-            top: 50,
-            left: 20,
-            child: IconButton(
-              icon: const Icon(Icons.close, color: Colors.white, size: 32),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ),
-        ],
-      ),
+    return CameraCaptureScaffold(
+      controller: _controller,
+      isInitializing: !_isCameraInitialized,
+      instructionText: 'Align identity document inside the frame',
+      errorText: _error,
+      currentStep: 1,
+      totalSteps: 3,
+      stepLabel: 'Scan Document',
+      onCapture: _takePicture,
+      onPickFromGallery: _pickImage,
+      onClose: () => Navigator.pop(context),
     );
   }
 }
