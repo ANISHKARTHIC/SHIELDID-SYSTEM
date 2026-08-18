@@ -79,26 +79,17 @@ class RemoteDataSource {
     return response.data;
   }
 
+  /// Finalizes the session with the operator's decision. The backend derives
+  /// the customer record (name/DOB/document number) from the OCR data it
+  /// already stored server-side during the /ocr step — it does not read any
+  /// OCR fields from this request body, so only the operator's own decision
+  /// and notes are sent.
   Future<Map<String, dynamic>> submitDecision(
     String sessionId,
     String decision,
     String notes,
-    Map<String, String> ocrData,
   ) async {
     final payload = {
-      'ocr_name': ocrData['ocr_name'] ?? '',
-      'ocr_dob': ocrData['ocr_dob'] ?? '',
-      'ocr_address': ocrData['ocr_address'] ?? 'NOT LEGIBLE',
-      'doc_number': ocrData['doc_number'] ?? 'NOT LEGIBLE',
-      'doc_type': ocrData['doc_type'] ?? 'driving_licence',
-      'expiry_date': ocrData['expiry_date'] ?? 'NOT LEGIBLE',
-      'issue_date': ocrData['issue_date'] ?? 'NOT LEGIBLE',
-      'ocr_confidence':
-          double.tryParse(ocrData['ocr_confidence'] ?? '0.9') ?? 0.9,
-      'quality_score': 1.0,
-      'authenticity_score': 1.0,
-      'risk_score': 1.0,
-      'ai_recommendation': 'PASS',
       'staff_decision': decision.toLowerCase(),
       'notes': notes,
     };

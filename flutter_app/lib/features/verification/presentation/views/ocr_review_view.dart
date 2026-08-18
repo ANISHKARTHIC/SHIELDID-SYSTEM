@@ -27,9 +27,22 @@ class _OCRReviewViewState extends State<OCRReviewView> {
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _dobController = TextEditingController();
   final TextEditingController _licenceController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _issueDateController = TextEditingController();
+  final TextEditingController _expiryDateController = TextEditingController();
 
   bool _isLoading = true;
   String? _error;
+
+  static const _notLegiblePlaceholder = 'NOT LEGIBLE';
+
+  /// The backend returns this literal string when a field couldn't be
+  /// extracted — treat it as empty in the editable UI so staff see a blank
+  /// field to fill in, not the placeholder text itself.
+  String _cleanField(dynamic value) {
+    final text = (value ?? '').toString();
+    return text == _notLegiblePlaceholder ? '' : text;
+  }
 
   static const _loadingMessages = [
     'Analyzing document…',
@@ -91,6 +104,9 @@ class _OCRReviewViewState extends State<OCRReviewView> {
               : '';
           _dobController.text = extracted['dob'] ?? '';
           _licenceController.text = extracted['document_number'] ?? '';
+          _addressController.text = _cleanField(extracted['address']);
+          _issueDateController.text = _cleanField(extracted['issue_date']);
+          _expiryDateController.text = _cleanField(extracted['expiry_date']);
           _isLoading = false;
         });
       }
@@ -111,6 +127,9 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     _firstNameController.dispose();
     _dobController.dispose();
     _licenceController.dispose();
+    _addressController.dispose();
+    _issueDateController.dispose();
+    _expiryDateController.dispose();
     super.dispose();
   }
 
@@ -166,6 +185,28 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     _licenceController,
                     isLowConfidence: true,
                   ),
+                  const SizedBox(height: 16),
+                  _buildEditableField(
+                    colors,
+                    'Date of Issue',
+                    _issueDateController,
+                    isLowConfidence: _issueDateController.text.isEmpty,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildEditableField(
+                    colors,
+                    'Date of Expiry',
+                    _expiryDateController,
+                    isLowConfidence: _expiryDateController.text.isEmpty,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildEditableField(
+                    colors,
+                    'Address',
+                    _addressController,
+                    isLowConfidence: _addressController.text.isEmpty,
+                    maxLines: 2,
+                  ),
                   const SizedBox(height: 40),
                   ElevatedButton(
                     onPressed: () {
@@ -174,12 +215,17 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                             '${_firstNameController.text} ${_surnameController.text}'
                                 .trim(),
                         'ocr_dob': _dobController.text,
-                        'ocr_address': 'NOT LEGIBLE',
+                        'ocr_address': _addressController.text.isNotEmpty
+                            ? _addressController.text
+                            : 'NOT LEGIBLE',
                         'doc_number': _licenceController.text,
                         'doc_type': 'driving_licence_or_passport',
-                        'expiry_date': 'NOT LEGIBLE',
-                        'issue_date': 'NOT LEGIBLE',
-                        'ocr_confidence': '0.9',
+                        'expiry_date': _expiryDateController.text.isNotEmpty
+                            ? _expiryDateController.text
+                            : 'NOT LEGIBLE',
+                        'issue_date': _issueDateController.text.isNotEmpty
+                            ? _issueDateController.text
+                            : 'NOT LEGIBLE',
                       };
 
                       Navigator.of(context).push(
@@ -211,9 +257,11 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     String label,
     TextEditingController controller, {
     bool isLowConfidence = false,
+    int maxLines = 1,
   }) {
     return TextField(
       controller: controller,
+      maxLines: maxLines,
       style: TextStyle(
         color: isLowConfidence ? colors.warning : colors.ink,
         fontSize: 17,

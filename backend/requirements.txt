@@ -6,9 +6,8 @@ psycopg2-binary
 pydantic
 pydantic-settings
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt==5.0.0
 python-multipart
-celery
 redis
 httpx
 pgvector

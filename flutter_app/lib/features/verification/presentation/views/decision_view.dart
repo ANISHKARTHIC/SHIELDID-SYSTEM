@@ -163,7 +163,6 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
         widget.sessionId,
         finalDecision,
         widget.reason,
-        widget.ocrData,
       );
 
       if (!mounted) return;

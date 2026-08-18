@@ -16,6 +16,7 @@ from backend.models import models
 from backend.api import deps
 from backend.api.v1_router import router as v1_router
 from backend.api.auth_router import router as auth_router
+from backend.api.users_router import router as users_router
 from backend.api.venue_router import router as venue_router
 from backend.api.replay_router import router as replay_router
 from backend.api.supervisor_router import router as supervisor_router
@@ -42,10 +43,28 @@ try:
             db.add(venue)
             db.commit()
             logger.info("Default Venue (ID=1) auto-seeded.")
-        
-        # Operators are created via POST /api/v1/auth/register with a real
-        # bcrypt-hashed password; no placeholder-hash user is auto-seeded
-        # here since it would be undecryptable and unable to log in.
+
+        # Bootstrap a super_admin if none exists yet, so there's always a
+        # way in to create further staff accounts via POST /api/v1/users
+        # now that self-registration is gone.
+        existing_admin = db.query(User).filter(User.role == RoleEnum.super_admin).first()
+        if not existing_admin:
+            from backend.core.security import get_password_hash
+            import secrets
+            bootstrap_password = secrets.token_urlsafe(12)
+            admin = User(
+                venue_id=venue.id,
+                email="admin@pub-entry.local",
+                hashed_password=get_password_hash(bootstrap_password),
+                role=RoleEnum.super_admin,
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+            logger.warning(
+                f"Bootstrap super_admin created: admin@pub-entry.local / {bootstrap_password} "
+                "— log in and change this immediately."
+            )
     except Exception as se:
         logger.error(f"Error seeding database: {se}")
         db.rollback()
@@ -80,6 +99,7 @@ app.add_middleware(
 
 app.include_router(v1_router)
 app.include_router(auth_router)
+app.include_router(users_router)
 app.include_router(venue_router)
 app.include_router(replay_router)
 app.include_router(supervisor_router)

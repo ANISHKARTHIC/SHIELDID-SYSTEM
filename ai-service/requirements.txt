@@ -3,10 +3,22 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 python-multipart
-# Imaging and AI tools
+python-dateutil
+
+# Imaging
 opencv-python-headless
 numpy
 Pillow
-# OCR and models will be defined via env configs and implementations
-# E.g. transformers, torch, easyocr, etc.
-python-dateutil
+
+# OCR
+easyocr==1.7.2
+
+# Face detection/recognition (InsightFace: RetinaFace + ArcFace)
+insightface==1.0.1
+onnxruntime==1.27.0
+
+# CPU-only torch. Installed with:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# (the Dockerfile passes this flag; installing without it pulls unneeded
+# CUDA wheels and bloats the image).
+torch==2.12.1

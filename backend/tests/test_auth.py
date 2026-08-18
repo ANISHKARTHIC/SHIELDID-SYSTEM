@@ -5,30 +5,16 @@ class TestAuthEndpoints(unittest.TestCase):
     def setUp(self):
         init_test_db()
 
-    def test_register_success(self):
+    def test_register_removed(self):
+        # Self-registration no longer exists; account creation moved to the
+        # admin-only POST /api/v1/users (see test_users.py).
         payload = {
             "username": "newguard",
             "email": "guard@venue.com",
             "password": "securepassword123"
         }
         response = client.post("/api/v1/auth/register", json=payload)
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data["email"], "guard@venue.com")
-        # username is derived from the email (consistent with /login, which
-        # has no separate username field to echo back)
-        self.assertEqual(data["username"], "guard")
-        self.assertIn("token", data)
-
-    def test_register_duplicate_email(self):
-        payload = {
-            "username": "testop",
-            "email": "testoperator@pub.com",
-            "password": "password"
-        }
-        response = client.post("/api/v1/auth/register", json=payload)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("already registered", response.json()["detail"])
+        self.assertEqual(response.status_code, 404)
 
     def test_login_success(self):
         payload = {

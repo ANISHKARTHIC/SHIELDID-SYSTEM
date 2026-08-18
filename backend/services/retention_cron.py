@@ -1,32 +1,71 @@
-import threading
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db.session import SessionLocal
-from backend.models.models import Customer, VerificationSession
+from backend.models.models import Customer, VerificationSession, Blacklist, AuditLog
 from backend.services.storage_service import storage_service
 from backend.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-def delete_expired_records():
-    """Scans the database and deletes expired PII/face embeddings and MinIO images."""
-    logger.info("Running GDPR data retention cron job...")
-    db: Session = SessionLocal()
+# How often the retention job runs. Anonymizing within an hour of a record
+# becoming eligible (rather than, say, once a day) keeps stale PII exposure
+# short without needing a separate always-on worker process.
+RETENTION_INTERVAL_HOURS = 1
+
+
+def delete_expired_records(trigger: str = "scheduled", db: Optional[Session] = None) -> dict:
+    """
+    Anonymizes PII (and deletes MinIO images) for customers whose
+    Customer.expires_at has passed, skipping anyone with an active
+    (non-expired) blacklist entry. Writes one summary AuditLog row per run.
+
+    `trigger` is "scheduled" for the periodic APScheduler job or "manual"
+    when invoked via the admin-triggered endpoint, so the audit trail can
+    distinguish the two.
+
+    `db` lets callers (the HTTP endpoint, tests) supply their own session —
+    e.g. so the endpoint uses the same request-scoped session FastAPI's
+    dependency-injected/overridden `get_db` provides, rather than always
+    opening a fresh one against the production engine directly. Falls back
+    to a standalone SessionLocal() for the APScheduler job, which has no
+    request context to inject from.
+    """
+    logger.info(f"Running data retention job (trigger={trigger})...")
+    owns_session = db is None
+    if db is None:
+        db = SessionLocal()
+    summary = {"trigger": trigger, "anonymized_count": 0, "skipped_blacklisted_count": 0, "customer_ids": []}
     try:
         now = datetime.now(timezone.utc)
-        
-        # 1. Find all expired customers (GDPR 30-day or custom retention)
-        expired_customers = db.query(Customer).filter(Customer.expires_at <= now).all()
+
+        expired_customers = (
+            db.query(Customer)
+            .filter(Customer.expires_at <= now)
+            .filter(Customer.is_anonymized.is_(False))
+            .all()
+        )
+
         for customer in expired_customers:
+            active_ban = (
+                db.query(Blacklist)
+                .filter(Blacklist.customer_id == customer.id)
+                .filter((Blacklist.expiry_date.is_(None)) | (Blacklist.expiry_date > now))
+                .first()
+            )
+            if active_ban:
+                summary["skipped_blacklisted_count"] += 1
+                continue
+
             logger.info(f"Anonymizing expired customer ID {customer.id}")
             customer.name = "Anonymized"
             customer.dob = None
             customer.face_embedding = None
-            
-            # Also find all logs for this customer and delete the images from MinIO
+            customer.is_anonymized = True
+
             sessions = db.query(VerificationSession).filter(VerificationSession.customer_id == customer.id).all()
             for session in sessions:
                 if session.id_image_path:
@@ -35,26 +74,35 @@ def delete_expired_records():
                 if session.face_image_path:
                     storage_service.delete_image(session.face_image_path)
                     session.face_image_path = None
-                    
-            db.commit()
-            
-        logger.info(f"Deleted PII for {len(expired_customers)} expired records.")
+
+            summary["anonymized_count"] += 1
+            summary["customer_ids"].append(customer.id)
+
+        db.add(AuditLog(user_id=None, action="retention_cleanup", details=summary))
+        db.commit()
+        logger.info(
+            f"Retention job complete: anonymized {summary['anonymized_count']}, "
+            f"skipped {summary['skipped_blacklisted_count']} blacklisted."
+        )
     except Exception as e:
         db.rollback()
-        logger.error(f"Error during retention cron: {e}")
+        logger.error(f"Error during retention job: {e}")
+        summary["error"] = str(e)
     finally:
-        db.close()
+        if owns_session:
+            db.close()
+
+    return summary
+
 
 def start_retention_cron():
     scheduler = BackgroundScheduler()
-    # Run every 24 hours in production, but for demo run every hour
     scheduler.add_job(
         delete_expired_records,
-        trigger=IntervalTrigger(hours=1),
+        trigger=IntervalTrigger(hours=RETENTION_INTERVAL_HOURS),
         id='retention_cron_job',
-        name='Delete expired GDPR data',
-        replace_existing=True
+        name='Anonymize expired customer data',
+        replace_existing=True,
     )
     scheduler.start()
-    logger.info("Retention cron scheduler started.")
-
+    logger.info(f"Retention cron scheduler started (every {RETENTION_INTERVAL_HOURS}h).")

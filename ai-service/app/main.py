@@ -148,6 +148,16 @@ async def classify_document_endpoint(file: UploadFile = File(...)):
         type_result = classify_document(contents, file.filename or "")
         result["document_type"] = type_result["document_type"]
         result["type_confidence"] = type_result["confidence"]
+        if type_result["document_type"] == "unknown":
+            # A face was detected, but no real evidence of a supported
+            # document (UK licence / passport marker text or number/MRZ
+            # shape) was found in the image content — reject rather than
+            # silently defaulting to a guessed document type.
+            result["is_valid"] = False
+            result["reason"] = (
+                "Could not identify this as a supported document. "
+                "Please scan a UK driving licence or passport."
+            )
     return result
 
 @app.post("/ocr")

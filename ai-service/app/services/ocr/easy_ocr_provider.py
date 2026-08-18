@@ -1,3 +1,4 @@
+import os
 import re
 import numpy as np
 import cv2
@@ -5,6 +6,11 @@ from PIL import Image
 import io
 from datetime import datetime
 from .base import BaseOCR
+
+# Defaults to EasyOCR's own default (~/.EasyOCR) for local dev; the Docker
+# image sets this to a baked-in in-image path so weights don't re-download
+# on every container start.
+MODEL_CACHE_DIR = os.getenv("EASYOCR_MODEL_DIR", os.path.expanduser("~/.EasyOCR"))
 
 class EasyOCRProvider(BaseOCR):
     def __init__(self):
@@ -18,7 +24,12 @@ class EasyOCRProvider(BaseOCR):
                 import torch
                 use_gpu = torch.cuda.is_available()
                 print(f"Initializing EasyOCR reader. GPU acceleration: {use_gpu}")
-                self.reader = easyocr.Reader(['en'], gpu=use_gpu)
+                self.reader = easyocr.Reader(
+                    ['en'],
+                    gpu=use_gpu,
+                    model_storage_directory=os.path.join(MODEL_CACHE_DIR, "model"),
+                    user_network_directory=os.path.join(MODEL_CACHE_DIR, "user_network"),
+                )
             except Exception as e:
                 print(f"Failed to load EasyOCR library: {e}")
         return self.reader
@@ -66,6 +77,31 @@ class EasyOCRProvider(BaseOCR):
         except Exception:
             return None
 
+    def read_raw_lines(self, image_bytes: bytes) -> list[tuple[str, float]]:
+        """
+        Runs EasyOCR on the full image and returns (text, confidence 0-100)
+        pairs with no document-type-specific parsing — used by document
+        classification, which needs to inspect real text content before it
+        knows which parser to route full extraction through.
+        """
+        reader = self._get_reader()
+        if reader is None:
+            raise RuntimeError("EasyOCR engine is not loaded. Ensure PyTorch/EasyOCR is installed.")
+
+        try:
+            pil_img = Image.open(io.BytesIO(image_bytes))
+            pil_img = pil_img.convert("RGB")
+            img = np.array(pil_img)
+        except Exception as e:
+            raise ValueError(f"Failed to decode image bytes in OCR: {e}")
+
+        try:
+            results = reader.readtext(img)
+        except Exception as e:
+            raise RuntimeError(f"OCR engine runtime error: {e}")
+
+        return [(r[1].upper().strip(), float(r[2]) * 100) for r in results]
+
     def extract_text(self, image_bytes: bytes, document_type: str) -> dict:
         reader = self._get_reader()
         if reader is None:
@@ -78,17 +114,17 @@ class EasyOCRProvider(BaseOCR):
             img = np.array(pil_img)
         except Exception as e:
             raise ValueError(f"Failed to decode image bytes in OCR: {e}")
-            
+
         # 2. Run EasyOCR
         try:
             results = reader.readtext(img)
         except Exception as e:
             raise RuntimeError(f"OCR engine runtime error: {e}")
-            
+
         lines = [r[1].upper().strip() for r in results]
         confidences = [r[2] for r in results]
         avg_confidence = float(np.mean(confidences)) * 100 if confidences else 0.0
-        
+
         print(f"OCR Extracted Lines: {lines}")
         if not lines:
             raise ValueError("No legible text could be extracted from the document. Please ensure the camera is in focus.")

@@ -1,4 +1,5 @@
 import logging
+import os
 import cv2
 import numpy as np
 from typing import Dict, Any
@@ -6,6 +7,11 @@ from numpy.linalg import norm
 from app.services.providers.base_providers import BaseFaceRecognition
 
 logger = logging.getLogger("insightface_provider")
+
+# Defaults to the host's ~/.insightface cache (InsightFace's own default) for
+# local dev; the Docker image sets this to a baked-in in-image path so
+# weights don't re-download on every container start.
+MODEL_CACHE_ROOT = os.getenv("INSIGHTFACE_MODEL_ROOT", os.path.expanduser("~/.insightface"))
 
 class InsightFaceProvider(BaseFaceRecognition):
     def __init__(self):
@@ -18,6 +24,7 @@ class InsightFaceProvider(BaseFaceRecognition):
             # Support GPU execution falling back to CPU
             self.app = FaceAnalysis(
                 name='buffalo_l',
+                root=MODEL_CACHE_ROOT,
                 providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
             )
             # ctx_id=0 for GPU. If CUDA is missing, providers list will safely fallback to CPU.

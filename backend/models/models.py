@@ -85,6 +85,7 @@ class Customer(Base):
     face_embedding = Column(Vector(512), nullable=True) # Storing 512D pgvector
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=True) # For GDPR retention policy
+    is_anonymized = Column(Boolean, default=False, nullable=False) # Set by the retention job once PII has been scrubbed
     notes = Column(Text, nullable=True)
     vip_tier = Column(String, default="none")
     manager_notes = Column(Text, nullable=True)

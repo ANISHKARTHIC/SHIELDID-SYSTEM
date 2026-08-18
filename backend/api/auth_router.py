@@ -3,18 +3,13 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from backend.api.deps import get_db
-from backend.core.security import get_password_hash, verify_password, create_access_token
-from backend.models.models import User, RoleEnum
+from backend.core.security import verify_password, create_access_token
+from backend.models.models import User
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
     username: str
-    password: str
-
-class RegisterRequest(BaseModel):
-    username: str
-    email: str
     password: str
 
 def _user_response(user: User) -> dict:
@@ -27,23 +22,8 @@ def _user_response(user: User) -> dict:
         "token": create_access_token(subject=user.id),
     }
 
-@router.post("/register")
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == req.email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    user = User(
-        venue_id=1,  # single-venue dev default until venue selection exists
-        email=req.email,
-        hashed_password=get_password_hash(req.password),
-        role=RoleEnum.door_staff,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    return _user_response(user)
+# Account creation is admin-only — see backend/api/users_router.py
+# (POST /api/v1/users). There is no public self-registration endpoint.
 
 @router.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):

@@ -8,7 +8,7 @@ import uuid
 from backend.api.deps import get_db, get_current_active_user
 from backend.db.redis import get_redis
 from backend.services.session_service import session_service
-from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote, User
+from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote, User, AuditLog
 from backend.schemas.schemas import BlacklistCreate, IncidentCreate, VerificationDecision
 from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
@@ -317,7 +317,10 @@ async def finalize_session(
         
     unique_id = ocr.get("document_number")
     customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
-    
+
+    # State mapping (computed early so retention window can vary by outcome)
+    final_decision_str = decision.staff_decision.lower()
+
     if not customer:
         dob_str = ocr.get("dob")
         dob_date = None
@@ -327,9 +330,21 @@ async def finalize_session(
                 dob_date = date_parser.parse(dob_str)
             except Exception:
                 dob_date = None
-        # GDPR Retention: 30 days
-        expires = datetime.now(timezone.utc) + timedelta(days=30)
-        
+
+        # Retention window comes from the venue's own policy, not a
+        # hardcoded constant: a clean PASS uses the shorter
+        # retention_days_success window (default 7), anything requiring a
+        # manual decision (CHECK/DENY/BLOCK) uses the longer
+        # retention_days_manual window (default 30) since those records are
+        # more likely to matter for a later dispute/review.
+        venue_config = venue_service.get_venue_configuration(db, current_user.venue_id)
+        retention_days = (
+            venue_config.retention_days_success
+            if final_decision_str == "pass"
+            else venue_config.retention_days_manual
+        )
+        expires = datetime.now(timezone.utc) + timedelta(days=retention_days)
+
         customer = Customer(
             unique_id=unique_id,
             name=ocr.get("name"),
@@ -340,9 +355,6 @@ async def finalize_session(
         db.add(customer)
         db.commit()
         db.refresh(customer)
-        
-    # State mapping
-    final_decision_str = decision.staff_decision.lower()
     if final_decision_str == "pass":
         final_state = SessionStateEnum.APPROVED
     elif final_decision_str == "deny":
@@ -531,3 +543,35 @@ async def flush_data(db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error during flush: {str(e)}")
+
+@router.post("/admin/retention/run", dependencies=[Depends(require_super_admin)])
+async def run_retention_now(db: Session = Depends(get_db)):
+    """Manually triggers the data retention job immediately, outside its
+    normal hourly schedule. Runs synchronously since the job is lightweight
+    (one query plus a per-row anonymize) and returns the same summary it
+    writes to the audit log."""
+    from backend.services.retention_cron import delete_expired_records
+    summary = delete_expired_records(trigger="manual", db=db)
+    if "error" in summary:
+        raise HTTPException(status_code=500, detail=f"Retention job failed: {summary['error']}")
+    return {"success": True, **summary}
+
+@router.get("/admin/retention/logs", dependencies=[Depends(require_super_admin)])
+async def get_retention_logs(limit: int = 50, db: Session = Depends(get_db)):
+    """Returns the audit trail of past retention job runs (scheduled and
+    manually-triggered), most recent first."""
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.action == "retention_cleanup")
+        .order_by(AuditLog.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": log.id,
+            "timestamp": log.timestamp.isoformat(),
+            "details": log.details,
+        }
+        for log in logs
+    ]
