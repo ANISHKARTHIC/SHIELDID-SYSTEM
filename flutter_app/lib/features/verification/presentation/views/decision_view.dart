@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../data/datasources/remote_data_source.dart';
+import '../../../../core/theme/app_theme.dart';
 
 class DecisionView extends StatefulWidget {
   final String decision;
@@ -28,18 +29,25 @@ class _DecisionViewState extends State<DecisionView> {
     setState(() {
       _isSubmitting = true;
     });
-    
+
     try {
       final remoteData = RemoteDataSource();
-      await remoteData.submitDecision(widget.sessionId, finalDecision, widget.reason, widget.ocrData);
-      
+      await remoteData.submitDecision(
+        widget.sessionId,
+        finalDecision,
+        widget.reason,
+        widget.ocrData,
+      );
+
       if (mounted) {
         // Pop back to home screen
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
         setState(() {
           _isSubmitting = false;
         });
@@ -47,66 +55,125 @@ class _DecisionViewState extends State<DecisionView> {
     }
   }
 
+  String _calculateAge(String? dobString) {
+    if (dobString == null || dobString.isEmpty) {
+      return 'N/A';
+    }
+    try {
+      final dob = DateTime.parse(dobString);
+      final today = DateTime.now();
+      int age = today.year - dob.year;
+      if (today.month < dob.month ||
+          (today.month == dob.month && today.day < dob.day)) {
+        age--;
+      }
+      return age.toString();
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    Color bgColor;
+    Color accentColor;
+    Color softColor;
     IconData icon;
-    
+    String label;
+
     switch (widget.decision) {
       case 'BLOCKED':
-        bgColor = Colors.red[900]!;
+        accentColor = AppColors.danger;
+        softColor = AppColors.dangerSoft;
         icon = Icons.block;
+        label = 'Blocked';
         break;
       case 'PASS':
-        bgColor = Colors.green[800]!;
+        accentColor = AppColors.success;
+        softColor = AppColors.successSoft;
         icon = Icons.check_circle_outline;
+        label = 'Allow';
         break;
       case 'DENY':
-        bgColor = Colors.red[800]!;
+        accentColor = AppColors.danger;
+        softColor = AppColors.dangerSoft;
         icon = Icons.cancel_outlined;
+        label = 'Deny';
         break;
       case 'CHECK':
       default:
-        bgColor = Colors.orange[800]!;
+        accentColor = AppColors.warning;
+        softColor = AppColors.warningSoft;
         icon = Icons.warning_amber_outlined;
+        label = 'Check';
         break;
     }
 
     return Scaffold(
-      backgroundColor: bgColor,
+      appBar: AppBar(title: const Text('Decision')),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(32.0),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(icon, size: 120, color: Colors.white),
-              const SizedBox(height: 24),
-              Text(
-                widget.decision,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 64, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              const SizedBox(height: 40),
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(16),
-                ),
+              AppSurface(
+                padding: const EdgeInsets.all(22),
                 child: Column(
                   children: [
-                    _buildDetailRow('Age', '34'), // In real app, pass from OCR
-                    const SizedBox(height: 16),
-                    _buildDetailRow('Risk Score', '${widget.riskScore}'),
-                    const SizedBox(height: 16),
-                    _buildDetailRow('Blacklist', widget.decision == 'BLOCKED' ? 'BANNED' : 'Clear'),
-                    const SizedBox(height: 24),
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        color: softColor,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(icon, size: 54, color: accentColor),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w900,
+                        color: accentColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Text(
                       widget.reason,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 18),
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 15,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              AppSurface(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 8,
+                ),
+                child: Column(
+                  children: [
+                    _buildDetailRow(
+                      'Age',
+                      _calculateAge(widget.ocrData['ocr_dob']),
+                    ),
+                    const Divider(color: AppColors.line, height: 1),
+                    _buildDetailRow(
+                      'Risk Score',
+                      '${(widget.riskScore * 100).clamp(0, 100).toInt()}%',
+                    ),
+                    const Divider(color: AppColors.line, height: 1),
+                    _buildDetailRow(
+                      'Venue Status',
+                      widget.decision == 'BLOCKED' ? 'Restricted' : 'Clear',
                     ),
                   ],
                 ),
@@ -114,47 +181,60 @@ class _DecisionViewState extends State<DecisionView> {
               const Spacer(),
               if (widget.decision == 'BLOCKED')
                 ElevatedButton(
-                  onPressed: _isSubmitting ? null : () => _submitDecision('BLOCK'),
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => _submitDecision('BLOCK'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.red[900],
-                    padding: const EdgeInsets.symmetric(vertical: 24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    backgroundColor: AppColors.danger,
                   ),
-                  child: _isSubmitting 
-                      ? const CircularProgressIndicator() 
-                      : const Text('DISMISS (BANNED)', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  child: _isSubmitting
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Dismiss Restricted Entry'),
                 )
               else
                 Row(
                   children: [
                     Expanded(
-                      child: ElevatedButton(
-                        onPressed: _isSubmitting ? null : () => _submitDecision('BLOCK'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red[800],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: OutlinedButton(
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => _submitDecision('BLOCK'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.danger,
+                          side: const BorderSide(color: AppColors.danger),
+                          minimumSize: const Size.fromHeight(56),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
-                        child: _isSubmitting 
-                            ? const CircularProgressIndicator(color: Colors.white) 
-                            : const Text('RESTRICT', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Restrict',
+                                style: TextStyle(fontWeight: FontWeight.w900),
+                              ),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: _isSubmitting ? null : () => _submitDecision('PASS'),
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => _submitDecision('PASS'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[700],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          backgroundColor: AppColors.success,
                         ),
-                        child: _isSubmitting 
-                            ? const CircularProgressIndicator(color: Colors.white) 
-                            : const Text('ALLOW', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        child: _isSubmitting
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text('Allow'),
                       ),
                     ),
                   ],
@@ -170,8 +250,25 @@ class _DecisionViewState extends State<DecisionView> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 18)),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
       ],
     );
   }

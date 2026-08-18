@@ -4,11 +4,11 @@ from sqlalchemy import func
 from datetime import date, timedelta
 from typing import List, Optional
 
-from backend.api.deps import get_db
+from backend.api.deps import get_db, get_current_active_user
 from backend.models.analytics_models import DailyVenueMetrics
 from backend.models.models import Venue
 
-router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
+router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"], dependencies=[Depends(get_current_active_user)])
 
 @router.get("/dashboard")
 async def get_dashboard_metrics(

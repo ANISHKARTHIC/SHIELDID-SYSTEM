@@ -2,10 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
-from backend.api.deps import get_db
+from backend.api.deps import get_db, get_current_active_user, RoleChecker
+from backend.models.models import RoleEnum
 from backend.services.venue_service import venue_service
 
-router = APIRouter(prefix="/api/v1/venues", tags=["venues"])
+router = APIRouter(prefix="/api/v1/venues", tags=["venues"], dependencies=[Depends(get_current_active_user)])
+require_admin = RoleChecker([RoleEnum.super_admin, RoleEnum.venue_admin])
 
 @router.get("/{venue_id}/config")
 def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
@@ -21,7 +23,7 @@ def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
         "theme_config": config.theme_config
     }
 
-@router.put("/{venue_id}/config")
+@router.put("/{venue_id}/config", dependencies=[Depends(require_admin)])
 def update_venue_config(venue_id: int, updates: Dict[str, Any], db: Session = Depends(get_db)):
     config = venue_service.update_configuration(db, venue_id, updates)
     return {"message": "Configuration updated successfully", "config_id": config.id}
@@ -40,7 +42,7 @@ def get_venue_policy(venue_id: int, db: Session = Depends(get_db)):
         "blacklist_policy": policy.blacklist_policy
     }
 
-@router.put("/{venue_id}/policy")
+@router.put("/{venue_id}/policy", dependencies=[Depends(require_admin)])
 def update_venue_policy(venue_id: int, updates: Dict[str, Any], db: Session = Depends(get_db)):
     policy = venue_service.update_policy(db, venue_id, updates)
     return {"message": "Policy updated successfully", "policy_id": policy.id}

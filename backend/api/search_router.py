@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from backend.api.deps import get_db
+from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import Customer, VerificationSession, User
 
-router = APIRouter(prefix="/api/v1/search", tags=["search"])
+router = APIRouter(prefix="/api/v1/search", tags=["search"], dependencies=[Depends(get_current_active_user)])
 
 @router.get("/")
 async def global_search(

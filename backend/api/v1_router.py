@@ -5,38 +5,44 @@ import httpx
 import json
 import uuid
 
-from backend.api.deps import get_db
+from backend.api.deps import get_db, get_current_active_user
 from backend.db.redis import get_redis
 from backend.services.session_service import session_service
-from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote
+from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote, User
 from backend.schemas.schemas import BlacklistCreate, IncidentCreate, VerificationDecision
 from backend.services.storage_service import storage_service
+from backend.services.venue_service import venue_service
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
 AI_SERVICE_URL = "http://localhost:8001"
 
 @router.post("/session/start")
-async def start_session(db: Session = Depends(get_db), redis_client = Depends(get_redis)):
-    """Initialize a new verification session"""
-    # For now, hardcode venue_id=1 and operator_id=1 for dev
-    session = session_service.create_session(db, venue_id=1, operator_id=1)
+async def start_session(
+    db: Session = Depends(get_db),
+    redis_client = Depends(get_redis),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Initialize a new verification session for the authenticated operator's venue"""
+    session = session_service.create_session(db, venue_id=current_user.venue_id, operator_id=current_user.id)
     session_id = session.id
     redis_client.setex(f"session:{session_id}", 3600, json.dumps({"step": 1, "status": "started", "session_id": session_id}))
     return {"session_id": session_id}
 
 @router.get("/operator/stats")
-async def get_operator_stats(db: Session = Depends(get_db)):
+async def get_operator_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get the current shift stats for the operator"""
-    # Hardcode operator 1 for dev
     today = datetime.now(timezone.utc).date()
-    sessions = db.query(VerificationSession).filter(VerificationSession.operator_id == 1).all()
-    
-    verified = sum(1 for s in sessions if s.final_decision == DecisionEnum.pass_decision and s.created_at.date() == today)
-    flagged = sum(1 for s in sessions if s.final_decision == DecisionEnum.deny_decision and s.created_at.date() == today)
-    pending = sum(1 for s in sessions if s.final_decision == None and s.created_at.date() == today)
-    
+    sessions = db.query(VerificationSession).filter(VerificationSession.operator_id == current_user.id).all()
+
+    verified = sum(1 for s in sessions if str(s.final_decision or "").lower() == "pass" and s.created_at and s.created_at.date() == today)
+    flagged = sum(1 for s in sessions if str(s.final_decision or "").lower() in ["deny", "blocked", "restricted"] and s.created_at and s.created_at.date() == today)
+    pending = sum(1 for s in sessions if s.final_decision is None and s.created_at and s.created_at.date() == today)
+
     return {
-        "operator_name": "John Doe",
+        "operator_name": current_user.email.split("@")[0],
         "verified": verified,
         "pending": pending,
         "flagged": flagged
@@ -108,10 +114,11 @@ async def extract_ocr(
         raise HTTPException(status_code=400, detail="Document must be classified first")
         
     file_bytes = await file.read()
+    document_type = session_data.get("classification", {}).get("document_type", "uk_driving_licence")
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
-        response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, timeout=10.0)
-        
+        response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=10.0)
+
         if response.status_code == 200:
             result = response.json()
             session_data["ocr"] = result["extracted_data"]
@@ -135,16 +142,17 @@ async def face_match(
     session_id: str,
     file: UploadFile = File(...),
     redis_client = Depends(get_redis),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Step 3: Capture Face & Match"""
     session_data_str = redis_client.get(f"session:{session_id}")
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found")
     session_data = json.loads(session_data_str)
-    
+
     file_bytes = await file.read()
-    
+
     # Save face to MinIO
     object_name = f"{session_id}_face.jpg"
     import tempfile
@@ -153,48 +161,80 @@ async def face_match(
         tmp_path = tmp.name
     storage_service.upload_image(tmp_path, object_name)
     session_data["face_image"] = object_name
-    
+
     try:
         session_service.update_session_data(db, session_id, {"face_image_path": object_name})
         session_service.transition_state(db, session_id, SessionStateEnum.FACE_CAPTURED)
     except ValueError:
         pass
-    
+
+    # Look up any existing customer by document number so we can pass their
+    # stored face embedding as a real comparison reference, rather than
+    # always returning a placeholder similarity of 0.0.
+    ocr = session_data["ocr"]
+    unique_id = ocr.get("document_number")
+    customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
+    reference_embedding = None
+    if customer is not None and customer.face_embedding is not None:
+        reference_embedding = json.dumps(list(customer.face_embedding))
+
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
-        response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, timeout=10.0)
-        
+        data = {'reference_embedding': reference_embedding} if reference_embedding else {}
+        response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=15.0)
+
         if response.status_code == 200:
             result = response.json()
             embedding = result["embedding"]
             session_data["embedding"] = embedding
-            
-            # Check venue status via DB
-            ocr = session_data["ocr"]
-            unique_id = ocr.get("document_number")
-            customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
-            
-            # Simulated Venue check
+
+            # Venue check: blacklist + incident history, scoped to this venue
             blacklisted = False
             incidents = 0
             if customer:
-                blacklisted = db.query(Blacklist).filter(Blacklist.customer_id == customer.id).first() is not None
-                incidents = db.query(Incident).filter(Incident.customer_id == customer.id).count()
-                
+                active_ban = db.query(Blacklist).filter(
+                    Blacklist.customer_id == customer.id
+                ).filter(
+                    (Blacklist.expiry_date.is_(None)) | (Blacklist.expiry_date > datetime.now(timezone.utc))
+                ).first()
+                blacklisted = active_ban is not None
+                incidents = db.query(Incident).filter(
+                    Incident.customer_id == customer.id,
+                    Incident.venue_id == current_user.venue_id
+                ).count()
+
             session_data["venue_check"] = {
                 "blacklisted": blacklisted,
                 "incidents": incidents
             }
-            
-            # Decision engine
+
+            # Real values from upstream steps instead of mocked constants
+            ocr_confidence = float(ocr.get("confidence", 0.0))
+            quality_score = float(session_data.get("classification", {}).get("type_confidence", 0.0)) * 100
+
+            # Policy engine: consult the venue's configured thresholds. Age is
+            # recalculated server-side from OCR'd DOB against this venue's
+            # configured minimum_age, never trusting a client-supplied age
+            # or the AI service's own hardcoded 18+ check.
+            policy = venue_service.get_venue_policy(db, current_user.venue_id)
+            face_similarity = result.get("similarity")
+            face_similarity = float(face_similarity) if face_similarity is not None else None
+
+            age_info = session_data["validation"].get("age_verification", {})
+            age = age_info.get("age")
+            meets_minimum_age = age is not None and age >= policy.minimum_age
+
             explainability = {
-                "ocr_confidence": 99.0, # Mocked for now until integrated with EasyOCR field confidences
-                "image_quality": 95.0, # Mocked
-                "face_similarity": float(result.get("similarity", 0.0)),
+                "ocr_confidence": ocr_confidence,
+                "image_quality": quality_score,
+                "face_similarity": face_similarity,
                 "blacklist_hit": blacklisted,
+                "age": age,
+                "minimum_age": policy.minimum_age,
+                "meets_minimum_age": meets_minimum_age,
                 "policy_trigger": "PASS"
             }
-            
+
             if blacklisted:
                 decision = "BLOCKED"
                 explainability["policy_trigger"] = "BLACKLIST"
@@ -203,29 +243,40 @@ async def face_match(
             elif not session_data["validation"].get("is_valid"):
                 decision = "CHECK"
                 explainability["policy_trigger"] = "INVALID_DOCUMENT"
+            elif not meets_minimum_age:
+                decision = "DENY"
+                explainability["policy_trigger"] = "UNDERAGE"
+            elif ocr_confidence < policy.ocr_confidence_threshold * 100:
+                decision = "CHECK"
+                explainability["policy_trigger"] = "LOW_OCR_CONFIDENCE"
+            elif policy.require_face_match and (face_similarity is None or face_similarity < policy.face_similarity_threshold):
+                decision = "CHECK"
+                explainability["policy_trigger"] = "FACE_MISMATCH"
             else:
                 decision = "PASS"
-                
+
             session_data["decision"] = decision
             session_data["explainability"] = explainability
             session_data["step"] = 4
             redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
-            
+
             try:
                 session_service.update_session_data(db, session_id, {
-                    "face_similarity": result.get("similarity", 0.0), 
-                    "risk_score": 0.0,
+                    "face_similarity": face_similarity,
+                    "risk_score": 1.0 if blacklisted else (0.5 if decision == "CHECK" else 0.0),
                     "explainability_report": explainability
                 })
                 session_service.transition_state(db, session_id, SessionStateEnum.FACE_VERIFIED)
             except ValueError:
                 pass
-                
+
             return {
                 "success": True,
                 "decision": decision,
                 "venue_check": session_data["venue_check"]
             }
+        elif response.status_code == 422:
+            raise HTTPException(status_code=422, detail="No face detected in the captured image")
         else:
             raise HTTPException(status_code=500, detail="Face matching failed")
 
@@ -234,7 +285,8 @@ async def finalize_session(
     session_id: str,
     decision: VerificationDecision,
     db: Session = Depends(get_db),
-    redis_client = Depends(get_redis)
+    redis_client = Depends(get_redis),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Step 4: Finalize and save to PostgreSQL with expires_at"""
     session_data_str = redis_client.get(f"session:{session_id}")
@@ -251,7 +303,13 @@ async def finalize_session(
     
     if not customer:
         dob_str = ocr.get("dob")
-        dob_date = datetime.strptime(dob_str, "%Y-%m-%d") if dob_str else None
+        dob_date = None
+        if dob_str:
+            try:
+                from dateutil import parser as date_parser
+                dob_date = date_parser.parse(dob_str)
+            except Exception:
+                dob_date = None
         # GDPR Retention: 30 days
         expires = datetime.now(timezone.utc) + timedelta(days=30)
         
@@ -272,7 +330,7 @@ async def finalize_session(
         final_state = SessionStateEnum.APPROVED
     elif final_decision_str == "deny":
         final_state = SessionStateEnum.DENIED
-    elif final_decision_str == "block":
+    elif final_decision_str in ["block", "restrict"]:
         final_state = SessionStateEnum.DENIED
         # Create Blacklist record
         existing_ban = db.query(Blacklist).filter(Blacklist.customer_id == customer.id).first()
@@ -280,7 +338,7 @@ async def finalize_session(
             new_ban = Blacklist(
                 customer_id=customer.id,
                 reason=decision.notes or "Manual RESTRICT by Operator",
-                banned_by_id=1 # Hardcoded for now
+                banned_by_id=current_user.id
             )
             db.add(new_ban)
             db.commit()
@@ -297,9 +355,8 @@ async def finalize_session(
     
     # Trigger Notification for DENY or CHECK
     if final_state in [SessionStateEnum.DENIED, SessionStateEnum.FRAUD_REVIEW]:
-        # hardcoding venue_id 1 for now as per system
         notif = Notification(
-            venue_id=1,
+            venue_id=current_user.venue_id,
             message=f"Session {session_id[:8]} flagged as {final_decision_str.upper()}: {decision.notes or 'No reason provided'}",
             type="ALERT"
         )
@@ -309,10 +366,20 @@ async def finalize_session(
     return {"success": True, "message": "Session finalized and locked as immutable package", "customer_id": customer.id}
 
 @router.get("/visitors")
-async def get_visitors(limit: int = 100, db: Session = Depends(get_db)):
-    customers = db.query(Customer).order_by(Customer.created_at.desc()).limit(limit).all()
+async def get_visitors(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    # Scope to customers who have visited the caller's venue, so one venue
+    # never sees another venue's restricted customer data (spec section 29).
+    customer_ids = db.query(VerificationSession.customer_id).filter(
+        VerificationSession.venue_id == current_user.venue_id,
+        VerificationSession.customer_id.isnot(None)
+    ).distinct()
+    customers = db.query(Customer).filter(Customer.id.in_(customer_ids)).order_by(Customer.created_at.desc()).limit(limit).all()
     results = []
-    
+
     for c in customers:
         # Get latest session for images
         latest_session = db.query(VerificationSession).filter(VerificationSession.customer_id == c.id).order_by(VerificationSession.created_at.desc()).first()
@@ -331,11 +398,14 @@ async def get_visitors(limit: int = 100, db: Session = Depends(get_db)):
         if latest_doc:
             doc_type = latest_doc.doc_type
             
+        now = datetime.now(timezone.utc)
+        age = (now.year - c.dob.year - ((now.month, now.day) < (c.dob.month, c.dob.day))) if c.dob else 0
+        
         results.append({
             "id": str(c.id),
             "name": c.name or "Unknown",
             "dob": c.dob.isoformat() if c.dob else "",
-            "age": (datetime.now(timezone.utc).year - c.dob.year) if c.dob else 0,
+            "age": age,
             "documentType": doc_type,
             "documentNumber": c.unique_id,
             "expiryDate": latest_doc.expiry_date.isoformat() if latest_doc and latest_doc.expiry_date else "",
@@ -358,10 +428,16 @@ async def get_visitors(limit: int = 100, db: Session = Depends(get_db)):
     return results
 
 @router.get("/sessions/history")
-async def get_session_history(limit: int = 50, db: Session = Depends(get_db)):
-    # Simple history query showing recent VerificationSession records
-    sessions = db.query(VerificationSession).order_by(VerificationSession.created_at.desc()).limit(limit).all()
-    
+async def get_session_history(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    # Simple history query showing recent VerificationSession records for the caller's venue
+    sessions = db.query(VerificationSession).filter(
+        VerificationSession.venue_id == current_user.venue_id
+    ).order_by(VerificationSession.created_at.desc()).limit(limit).all()
+
     results = []
     for s in sessions:
         results.append({
@@ -374,8 +450,14 @@ async def get_session_history(limit: int = 50, db: Session = Depends(get_db)):
     return results
 
 @router.get("/notifications")
-async def get_notifications(limit: int = 50, db: Session = Depends(get_db)):
-    notifs = db.query(Notification).order_by(Notification.created_at.desc()).limit(limit).all()
+async def get_notifications(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    notifs = db.query(Notification).filter(
+        Notification.venue_id == current_user.venue_id
+    ).order_by(Notification.created_at.desc()).limit(limit).all()
     return [{
         "id": n.id,
         "message": n.message,
@@ -384,7 +466,11 @@ async def get_notifications(limit: int = 50, db: Session = Depends(get_db)):
         "created_at": n.created_at.isoformat()
     } for n in notifs]
 
-@router.post("/admin/flush")
+from backend.api.deps import RoleChecker
+from backend.models.models import RoleEnum
+require_super_admin = RoleChecker([RoleEnum.super_admin])
+
+@router.post("/admin/flush", dependencies=[Depends(require_super_admin)])
 async def flush_data(db: Session = Depends(get_db)):
     """Flushes all visitors and session data EXCEPT blacklisted users."""
     # Find all customer IDs that are blacklisted

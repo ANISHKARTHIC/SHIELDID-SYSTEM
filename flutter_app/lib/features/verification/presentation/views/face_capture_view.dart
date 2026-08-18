@@ -42,12 +42,16 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
         break;
       }
     }
-    
+
     // Fallback to first camera if front not found
     frontCamera ??= cameras.first;
 
-    _controller = CameraController(frontCamera, ResolutionPreset.high, enableAudio: false);
-    
+    _controller = CameraController(
+      frontCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+
     try {
       await _controller!.initialize();
       if (mounted) setState(() => _isCameraInitialized = true);
@@ -72,17 +76,38 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
     try {
       final remoteData = RemoteDataSource();
       final result = await remoteData.verifyFace(widget.sessionId, path);
-      
+
       if (result['success'] == true) {
+        final decision = (result['decision'] ?? 'CHECK').toString();
+        final venueCheck = result['venue_check'] as Map<String, dynamic>? ?? {};
+        final isBlocked = decision == 'BLOCKED';
+        final isCheck = decision == 'CHECK';
+        final riskScore = isBlocked
+            ? 1.0
+            : isCheck
+            ? 0.65
+            : 0.18;
+        final reason = isBlocked
+            ? 'Visitor has an active venue restriction.'
+            : isCheck
+            ? 'Document details need supervisor review.'
+            : 'Face image captured and no venue restriction was found.';
+
         if (mounted) {
-          // Pass data to decision view
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => DecisionView(
-            decision: 'PASS', 
-            riskScore: 2.5, // Mock score for now based on embedding success
-            reason: 'Face matched successfully.',
-            sessionId: widget.sessionId,
-            ocrData: widget.ocrData,
-          )));
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DecisionView(
+                decision: decision,
+                riskScore: riskScore,
+                reason: venueCheck['blacklisted'] == true
+                    ? 'Visitor has an active venue restriction.'
+                    : reason,
+                sessionId: widget.sessionId,
+                ocrData: widget.ocrData,
+              ),
+            ),
+          );
         }
       } else {
         setState(() {
@@ -121,7 +146,10 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
   @override
   Widget build(BuildContext context) {
     if (!_isCameraInitialized) {
-      return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -130,15 +158,21 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
         fit: StackFit.expand,
         children: [
           CameraPreview(_controller!),
-          
+
           // Guide Frame Overlay
           ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.6), BlendMode.srcOut),
+            colorFilter: ColorFilter.mode(
+              Colors.black.withValues(alpha: 0.6),
+              BlendMode.srcOut,
+            ),
             child: Stack(
               fit: StackFit.expand,
               children: [
                 Container(
-                  decoration: const BoxDecoration(color: Colors.black, backgroundBlendMode: BlendMode.dstOut),
+                  decoration: const BoxDecoration(
+                    color: Colors.black,
+                    backgroundBlendMode: BlendMode.dstOut,
+                  ),
                 ),
                 Center(
                   child: Container(
@@ -146,14 +180,16 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
                     height: MediaQuery.of(context).size.width * 0.9,
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(200), // Oval shape for face
+                      borderRadius: BorderRadius.circular(
+                        200,
+                      ), // Oval shape for face
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
           // Instructions
           Positioned(
             top: 100,
@@ -164,7 +200,11 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
                 const Text(
                   "Position face inside the oval",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 if (_error != null)
                   Padding(
@@ -172,13 +212,17 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
                     child: Text(
                       _error!,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          
+
           // Bottom Controls
           if (!_isProcessing)
             Positioned(
@@ -203,13 +247,17 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
                   ),
                   IconButton(
                     onPressed: _pickImage,
-                    icon: const Icon(Icons.photo_library, color: Colors.white, size: 36),
+                    icon: const Icon(
+                      Icons.photo_library,
+                      color: Colors.white,
+                      size: 36,
+                    ),
                     tooltip: 'Upload from Gallery',
                   ),
                 ],
               ),
             ),
-            
+
           if (_isProcessing)
             Container(
               color: Colors.black54,
@@ -217,14 +265,18 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
                 child: CircularProgressIndicator(color: Colors.blueAccent),
               ),
             ),
-            
+
           // Back Button
           if (!_isProcessing)
             Positioned(
               top: 50,
               left: 20,
               child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 32),
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.white,
+                  size: 32,
+                ),
                 onPressed: () => Navigator.pop(context),
               ),
             ),

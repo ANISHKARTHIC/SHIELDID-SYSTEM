@@ -6,10 +6,10 @@ from typing import Optional
 import io
 import csv
 
-from backend.api.deps import get_db
+from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import VerificationSession
 
-router = APIRouter(prefix="/api/v1/export", tags=["export"])
+router = APIRouter(prefix="/api/v1/export", tags=["export"], dependencies=[Depends(get_current_active_user)])
 
 @router.get("/csv/fraud")
 async def export_fraud_csv(

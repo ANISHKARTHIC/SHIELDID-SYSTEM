@@ -1,9 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 import re
 import json
+import numpy as np
 
 from contextlib import asynccontextmanager
 from app.core.model_registry import model_registry
@@ -134,76 +135,85 @@ async def scan_document_endpoint(file: UploadFile = File(...)):
         "flags": authenticity["possible_issues"] + ocr_validation_errors + general_validation_errors
     }
 
-@app.post("/verify/face-age")
-async def verify_face_age_endpoint(file: UploadFile = File(...)):
-    filename = file.filename.lower()
-    
-    if "underage" in filename:
-        estimated_age = 16
-        confidence = 0.94
-        is_adult = False
-        risk_level = "high"
-    elif "adult" in filename or "over18" in filename:
-        estimated_age = 23
-        confidence = 0.98
-        is_adult = True
-        risk_level = "low"
-    else:
-        estimated_age = 24
-        confidence = 0.96
-        is_adult = True
-        risk_level = "low"
-        
-    return {
-        "estimated_age": estimated_age,
-        "confidence": confidence,
-        "is_adult": is_adult,
-        "risk_level": risk_level
-    }
-
 from app.services.classifier import classify_document_real
-from app.services.embedder import generate_embedding
+from app.services.document_classifier import classify_document
 
 @app.post("/classify")
 async def classify_document_endpoint(file: UploadFile = File(...)):
-    """Step 1: Determine if the uploaded image is a valid identity document"""
+    """Step 1: Determine if the uploaded image is a valid identity document,
+    and which supported document type it is, so OCR can route correctly."""
     contents = await file.read()
     result = classify_document_real(contents)
+    if result["is_valid"]:
+        type_result = classify_document(contents, file.filename or "")
+        result["document_type"] = type_result["document_type"]
+        result["type_confidence"] = type_result["confidence"]
     return result
 
 @app.post("/ocr")
-async def extract_ocr_endpoint(file: UploadFile = File(...)):
-    """Step 2: Extract text from the identity document"""
+async def extract_ocr_endpoint(file: UploadFile = File(...), document_type: str = "uk_driving_licence"):
+    """Step 2: Extract text from the identity document, routed by the
+    document_type determined during /classify (defaults to UK driving licence
+    for backward compatibility if the caller omits it)."""
     contents = await file.read()
-    
-    # Using existing OCR factory for mockup data based on classifier
+
     from app.services.ocr.factory import get_ocr_provider
     ocr_provider = get_ocr_provider()
-    
-    # Mocking standard UK DL/Passport results for demonstration
-    ocr_result = ocr_provider.extract_text(contents, "uk_driving_licence")
-    
-    # Validation logic
+
+    ocr_result = ocr_provider.extract_text(contents, document_type)
+
     from app.services.data_validation import validate_extracted_data
     validation = validate_extracted_data(ocr_result)
-    
+
     return {
         "success": True,
         "extracted_data": ocr_result,
         "validation": validation
     }
 
+from fastapi import Form
+
 @app.post("/face-match")
-async def face_match_endpoint(file: UploadFile = File(...)):
-    """Step 3: Generate a 512D embedding vector for pgvector storage/matching"""
+async def face_match_endpoint(file: UploadFile = File(...), reference_embedding: str = Form(None)):
+    """
+    Step 3: Extract a real 512D ArcFace embedding for the captured face via
+    InsightFace (RetinaFace detection + ArcFace recognition), and optionally
+    compare it against a reference embedding (JSON-encoded list of floats)
+    from a previously stored customer to produce a genuine similarity score.
+    """
+    import tempfile
+    import os
+
     contents = await file.read()
-    embedding = generate_embedding(contents)
-    
-    return {
-        "success": True,
-        "embedding": embedding,
-        "dimensions": len(embedding)
-    }
+    face_provider = model_registry.get_provider('face')
+    if face_provider is None or face_provider.app is None:
+        raise HTTPException(status_code=503, detail="Face recognition model is not loaded")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(contents)
+            tmp_path = tmp.name
+
+        embedding = face_provider.extract_embedding(tmp_path)
+
+        similarity = None
+        if reference_embedding:
+            ref = np.array(json.loads(reference_embedding), dtype=np.float32)
+            similarity = face_provider.compare(embedding, ref)
+
+        return {
+            "success": True,
+            "embedding": embedding.tolist(),
+            "dimensions": len(embedding),
+            "similarity": similarity
+        }
+    except ValueError as e:
+        # No face detected in the captured image
+        return JSONResponse(status_code=422, content={"success": False, "message": str(e)})
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 from app.api.v1_router import router as v1_router
 app.include_router(v1_router)

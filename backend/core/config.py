@@ -9,10 +9,10 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "admin"
     POSTGRES_PASSWORD: str = "adminpassword"
     POSTGRES_SERVER: str = "localhost"
-    POSTGRES_PORT: str = "5433"
+    POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "pub_entry_db"
     
-    REDIS_URL: str = "redis://localhost:6380/0"
+    REDIS_URL: str = "redis://localhost:6379/0"
     
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
+        # If DB_ENGINE is set to sqlite or postgres unavailable, allow sqlite
+        custom_uri = os.getenv("DATABASE_URL")
+        if custom_uri:
+            return custom_uri
         return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

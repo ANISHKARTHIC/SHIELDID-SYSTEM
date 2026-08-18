@@ -50,17 +50,17 @@ class IncidentCreate(BaseModel):
     staff_notes: Optional[str] = None
 
 class VerificationDecision(BaseModel):
-    ocr_name: str
-    ocr_dob: str
-    ocr_address: str
-    doc_number: str
-    doc_type: str
-    expiry_date: str
-    issue_date: str
-    ocr_confidence: float
-    quality_score: float
-    authenticity_score: float
-    risk_score: float
-    ai_recommendation: str
-    staff_decision: str # pass, deny, check
+    ocr_name: Optional[str] = None
+    ocr_dob: Optional[str] = None
+    ocr_address: Optional[str] = None
+    doc_number: Optional[str] = None
+    doc_type: Optional[str] = "uk_driving_licence"
+    expiry_date: Optional[str] = None
+    issue_date: Optional[str] = None
+    ocr_confidence: Optional[float] = 0.0
+    quality_score: Optional[float] = 0.0
+    authenticity_score: Optional[float] = 0.0
+    risk_score: Optional[float] = 0.0
+    ai_recommendation: Optional[str] = "PASS"
+    staff_decision: str # pass, deny, check, block
     notes: Optional[str] = None

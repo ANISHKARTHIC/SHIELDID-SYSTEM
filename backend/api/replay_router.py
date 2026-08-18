@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import VerificationSession, SessionAuditLog, User
 
-router = APIRouter(prefix="/api/v1/replay", tags=["replay"])
+router = APIRouter(prefix="/api/v1/replay", tags=["replay"], dependencies=[Depends(get_current_active_user)])
 
 @router.get("/{session_id}")
 async def get_session_replay(session_id: str, db: Session = Depends(get_db)):
@@ -37,19 +37,19 @@ async def get_session_timeline(session_id: str, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    logs = db.query(SessionAuditLog).filter(SessionAuditLog.session_id == session_id).order_by(SessionAuditLog.created_at.asc()).all()
+    logs = db.query(SessionAuditLog).filter(SessionAuditLog.session_id == session_id).order_by(SessionAuditLog.timestamp.asc()).all()
     
     timeline = []
     for log in logs:
         timeline.append({
             "id": log.id,
-            "timestamp": log.created_at,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
             "operator_id": log.operator_id,
             "state_from": log.state_from,
             "state_to": log.state_to,
             "duration_ms": log.duration_ms,
             "device_info": log.device_info,
-            "event_details": log.event_details
+            "event_details": getattr(log, "device_info", None)
         })
         
     return {"session_id": session_id, "timeline": timeline}

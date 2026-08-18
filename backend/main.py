@@ -30,6 +30,28 @@ logger = get_logger("main")
 try:
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables initialized successfully.")
+    
+    # Auto-seed database
+    from backend.db.session import SessionLocal
+    from backend.models.models import Venue, User, RoleEnum
+    db = SessionLocal()
+    try:
+        venue = db.query(Venue).filter(Venue.id == 1).first()
+        if not venue:
+            venue = Venue(id=1, name="Default Venue", address="123 Main St")
+            db.add(venue)
+            db.commit()
+            logger.info("Default Venue (ID=1) auto-seeded.")
+        
+        # Operators are created via POST /api/v1/auth/register with a real
+        # bcrypt-hashed password; no placeholder-hash user is auto-seeded
+        # here since it would be undecryptable and unable to log in.
+    except Exception as se:
+        logger.error(f"Error seeding database: {se}")
+        db.rollback()
+    finally:
+        db.close()
+
 except Exception as e:
     logger.error(f"Error initializing database tables: {e}")
 

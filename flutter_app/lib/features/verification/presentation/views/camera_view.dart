@@ -24,13 +24,13 @@ class _CameraViewState extends State<CameraView> {
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) return;
-    
+
     _controller = CameraController(
-      cameras.first, 
+      cameras.first,
       ResolutionPreset.high,
       enableAudio: false,
     );
-    
+
     try {
       await _controller!.initialize();
       if (mounted) {
@@ -51,7 +51,7 @@ class _CameraViewState extends State<CameraView> {
 
   Future<void> _takePicture() async {
     if (!_controller!.value.isInitialized) return;
-    
+
     try {
       final image = await _controller!.takePicture();
       _navigateToReview(image.path);
@@ -63,7 +63,7 @@ class _CameraViewState extends State<CameraView> {
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    
+
     if (image != null) {
       _navigateToReview(image.path);
     }
@@ -71,17 +71,23 @@ class _CameraViewState extends State<CameraView> {
 
   void _navigateToReview(String path) {
     if (mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => OCRReviewView(
-        imagePath: path,
-        sessionId: widget.sessionId,
-      )));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              OCRReviewView(imagePath: path, sessionId: widget.sessionId),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_isCameraInitialized) {
-      return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -90,15 +96,21 @@ class _CameraViewState extends State<CameraView> {
         fit: StackFit.expand,
         children: [
           CameraPreview(_controller!),
-          
+
           // Guide Frame Overlay
           ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.6), BlendMode.srcOut),
+            colorFilter: ColorFilter.mode(
+              Colors.black.withValues(alpha: 0.6),
+              BlendMode.srcOut,
+            ),
             child: Stack(
               fit: StackFit.expand,
               children: [
                 Container(
-                  decoration: const BoxDecoration(color: Colors.black, backgroundBlendMode: BlendMode.dstOut),
+                  decoration: const BoxDecoration(
+                    color: Colors.black,
+                    backgroundBlendMode: BlendMode.dstOut,
+                  ),
                 ),
                 Center(
                   child: Container(
@@ -113,7 +125,7 @@ class _CameraViewState extends State<CameraView> {
               ],
             ),
           ),
-          
+
           // Instructions
           Positioned(
             top: 100,
@@ -122,10 +134,14 @@ class _CameraViewState extends State<CameraView> {
             child: const Text(
               "Align Identity Document inside the frame",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          
+
           // Bottom Controls
           Positioned(
             bottom: 60,
@@ -136,7 +152,7 @@ class _CameraViewState extends State<CameraView> {
               children: [
                 // Spacer for symmetry
                 const SizedBox(width: 60),
-                
+
                 // Capture Button
                 GestureDetector(
                   onTap: _takePicture,
@@ -150,17 +166,21 @@ class _CameraViewState extends State<CameraView> {
                     ),
                   ),
                 ),
-                
+
                 // Upload Button
                 IconButton(
                   onPressed: _pickImage,
-                  icon: const Icon(Icons.photo_library, color: Colors.white, size: 36),
+                  icon: const Icon(
+                    Icons.photo_library,
+                    color: Colors.white,
+                    size: 36,
+                  ),
                   tooltip: 'Upload from Gallery',
                 ),
               ],
             ),
           ),
-          
+
           // Back Button
           Positioned(
             top: 50,

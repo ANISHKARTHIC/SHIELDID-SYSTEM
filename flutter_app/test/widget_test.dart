@@ -3,7 +3,7 @@ import 'package:pub_entry_app/main.dart';
 
 void main() {
   testWidgets('App loads without errors', (WidgetTester tester) async {
-    await tester.pumpWidget(const PubEntryApp());
+    await tester.pumpWidget(const PubEntryApp(loadInitialData: false));
     expect(find.byType(PubEntryApp), findsOneWidget);
   });
 }

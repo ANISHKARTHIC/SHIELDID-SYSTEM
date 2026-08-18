@@ -7,8 +7,12 @@ def detect_face(image_bytes: bytes) -> bool:
         from app.core.model_registry import model_registry
         
         nparr = np.frombuffer(image_bytes, np.uint8)
+        if len(nparr) == 0:
+            return False
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+        if img is None:
+            return False
+            
         face_provider = model_registry.providers.get('face')
         if face_provider and face_provider.app:
             faces = face_provider.app.get(img)
