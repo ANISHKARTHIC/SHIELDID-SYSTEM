@@ -86,7 +86,7 @@ async def classify_document(
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/classify", files=files, timeout=20.0)
+            response = await client.post(f"{AI_SERVICE_URL}/classify", files=files, timeout=60.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Document classification is taking too long. Please try again.")
         except httpx.ConnectError:
@@ -127,7 +127,7 @@ async def extract_ocr(
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=30.0)
+            response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=60.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Text extraction is taking too long. Please try again.")
         except httpx.ConnectError:
@@ -200,7 +200,7 @@ async def face_match(
         files = {'file': (file.filename, file_bytes, file.content_type)}
         data = {'reference_embedding': reference_embedding} if reference_embedding else {}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=20.0)
+            response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=60.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Face verification is taking too long. Please try again.")
         except httpx.ConnectError:
