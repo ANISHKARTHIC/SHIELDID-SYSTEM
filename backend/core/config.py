@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # URL the backend uses to reach the AI microservice. In AWS this should
     # be the internal service-discovery/ALB address (e.g. ECS Cloud Map DNS
     # or an internal load balancer DNS name), not localhost.
-    AI_SERVICE_URL: str = "http://localhost:8001"
+    AI_SERVICE_URL: str = "http://ai-service:8001"
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

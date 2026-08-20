@@ -15,7 +15,15 @@ from backend.services.venue_service import venue_service
 from backend.core.config import settings
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
-AI_SERVICE_URL = settings.AI_SERVICE_URL
+
+def get_ai_service_url() -> str:
+    import os
+    url = os.getenv("AI_SERVICE_URL") or settings.AI_SERVICE_URL
+    if os.getenv("POSTGRES_SERVER") == "db" and "localhost" in url:
+        url = url.replace("localhost", "ai-service")
+    return url
+
+AI_SERVICE_URL = get_ai_service_url()
 
 @router.post("/session/start")
 async def start_session(
