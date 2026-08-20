@@ -88,6 +88,13 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: venuepass_backend
+    # Seed the database (default venue + bootstrap super_admin from
+    # SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD below) before starting the API —
+    # backend/seed.py is idempotent, so this is safe to run on every
+    # container start/restart.
+    command: >
+      sh -c "python -m backend.seed &&
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -104,6 +111,12 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      # Bootstrap super_admin — created once on first startup if no account
+      # with this email exists yet (backend/seed.py, run by
+      # backend/entrypoint.sh before uvicorn starts). Change the password
+      # before deploying anywhere reachable from outside your own machine.
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@venuepass.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMe123!}
     depends_on:
       db:
         condition: service_healthy

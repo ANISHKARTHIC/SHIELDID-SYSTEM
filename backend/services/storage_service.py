@@ -34,13 +34,24 @@ class StorageService:
                 "region_name": settings.AWS_REGION,
                 "config": BotoConfig(
                     signature_version="s3v4",
-                    s3={"addressing_style": "path" if settings.resolved_s3_path_style else "auto"},
+                    s3={"addressing_style": "path" if settings.resolved_s3_path_style else "virtual"},
                 ),
             }
 
             endpoint_url = settings.resolved_s3_endpoint_url
             if endpoint_url:
                 client_kwargs["endpoint_url"] = endpoint_url
+            elif settings.AWS_REGION != "us-east-1":
+                # boto3's "auto" addressing can resolve to the global
+                # s3.amazonaws.com host while still signing the request for
+                # a non-us-east-1 region — S3 then 400s because the
+                # endpoint's implied region (us-east-1) doesn't match the
+                # signature's credential scope. Pointing at the region's own
+                # endpoint (bucket.s3.<region>.amazonaws.com, via
+                # addressing_style=virtual above) keeps host and signature
+                # region consistent. us-east-1 is exempt since its regional
+                # and global endpoints are the same thing.
+                client_kwargs["endpoint_url"] = f"https://s3.{settings.AWS_REGION}.amazonaws.com"
 
             # Only pass explicit credentials for local/MinIO use. In AWS,
             # omit them so boto3 falls back to its default credential chain
@@ -134,30 +145,26 @@ class StorageService:
         except (ClientError, BotoCoreError) as e:
             logger.error(f"Error deleting from S3: {e}")
 
-    def move_to_banned(self, object_name: str) -> str:
+    def _move(self, object_name: str, from_prefix: str, to_prefix: str) -> str:
         """
-        Relocates an object from scans/unflagged/ to scans/flagged/ (S3 has
-        no rename, so this is a server-side copy + delete of the original).
-        Used when a customer is banned after their images were already
-        uploaded under scans/unflagged/ — e.g. a standalone ban against
-        someone from a past visit.
+        Relocates an object between the two known prefixes (S3 has no
+        rename, so this is a server-side copy + delete of the original).
 
-        Returns the new scans/flagged/ key, or the original key unchanged
-        if the object was already under scans/flagged/, wasn't under
-        scans/unflagged/ (unexpected key shape — left alone rather than
-        guessed at), or the client isn't configured.
+        Returns the new key, or the original key unchanged if it's already
+        under to_prefix, wasn't under from_prefix (unexpected key shape —
+        left alone rather than guessed at), or the client isn't configured.
         """
         if not self.client or not object_name:
             return object_name
 
-        if object_name.startswith(BANNED_PREFIX):
+        if object_name.startswith(to_prefix):
             return object_name
 
-        if not object_name.startswith(NORMAL_PREFIX):
-            logger.warning(f"Cannot move {object_name} to banned/: unrecognized key prefix.")
+        if not object_name.startswith(from_prefix):
+            logger.warning(f"Cannot move {object_name} to {to_prefix}: unrecognized key prefix.")
             return object_name
 
-        new_name = BANNED_PREFIX + object_name[len(NORMAL_PREFIX):]
+        new_name = to_prefix + object_name[len(from_prefix):]
         try:
             # Metadata (including ContentType) carries over from the source
             # object automatically since MetadataDirective isn't set to
@@ -168,11 +175,29 @@ class StorageService:
                 Key=new_name,
             )
             self.client.delete_object(Bucket=self.bucket_name, Key=object_name)
-            logger.info(f"Moved {object_name} to {new_name} (customer banned).")
+            logger.info(f"Moved {object_name} to {new_name}.")
             return new_name
         except (ClientError, BotoCoreError) as e:
-            logger.error(f"Error moving {object_name} to banned/: {e}")
+            logger.error(f"Error moving {object_name} to {to_prefix}: {e}")
             return object_name
+
+    def move_to_banned(self, object_name: str) -> str:
+        """
+        Relocates an object from scans/unflagged/ to scans/flagged/. Used
+        when a customer is banned after their images were already uploaded
+        under scans/unflagged/ — e.g. a standalone ban against someone from
+        a past visit.
+        """
+        return self._move(object_name, NORMAL_PREFIX, BANNED_PREFIX)
+
+    def move_to_unflagged(self, object_name: str) -> str:
+        """
+        Relocates an object from scans/flagged/ back to scans/unflagged/.
+        Used when a ban is lifted, so the customer's images become subject
+        to routine retention/lifecycle expiry again instead of being
+        retained permanently.
+        """
+        return self._move(object_name, BANNED_PREFIX, NORMAL_PREFIX)
 
 
 storage_service = StorageService()

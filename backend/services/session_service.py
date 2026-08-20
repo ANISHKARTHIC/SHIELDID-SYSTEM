@@ -91,14 +91,14 @@ class SessionService:
     def quarantine_customer_images(self, db: Session, customer_id: int) -> int:
         """
         Moves every id/face image belonging to this customer's sessions from
-        the normal/ S3 prefix to banned/, and updates the stored paths to
-        match. Called whenever a ban is created — whether auto-detected
-        mid-session (face_match) or applied standalone against a past
-        visitor (blacklist_router) — so a banned customer's images always
-        end up isolated from routine retention/export operations that only
-        target normal/. Bypasses the is_locked check that update_session_data
-        enforces, since a finalized/locked session's images still need to be
-        movable when a ban comes later.
+        the scans/unflagged/ S3 prefix to scans/flagged/, and updates the
+        stored paths to match. Called whenever a ban is created — whether
+        auto-detected mid-session (face_match) or applied standalone against
+        a past visitor (blacklist_router) — so a banned customer's images
+        always end up isolated from routine retention/export operations that
+        only target scans/unflagged/. Bypasses the is_locked check that
+        update_session_data enforces, since a finalized/locked session's
+        images still need to be movable when a ban comes later.
 
         Returns the number of image objects moved.
         """
@@ -112,6 +112,32 @@ class SessionService:
                     moved += 1
             if session.face_image_path:
                 new_path = storage_service.move_to_banned(session.face_image_path)
+                if new_path != session.face_image_path:
+                    session.face_image_path = new_path
+                    moved += 1
+        if moved:
+            db.commit()
+        return moved
+
+    def restore_customer_images(self, db: Session, customer_id: int) -> int:
+        """
+        The reverse of quarantine_customer_images: moves every id/face image
+        belonging to this customer's sessions from scans/flagged/ back to
+        scans/unflagged/, so their images become subject to routine
+        retention/lifecycle expiry again. Called when a ban is lifted.
+
+        Returns the number of image objects moved.
+        """
+        sessions = db.query(VerificationSession).filter(VerificationSession.customer_id == customer_id).all()
+        moved = 0
+        for session in sessions:
+            if session.id_image_path:
+                new_path = storage_service.move_to_unflagged(session.id_image_path)
+                if new_path != session.id_image_path:
+                    session.id_image_path = new_path
+                    moved += 1
+            if session.face_image_path:
+                new_path = storage_service.move_to_unflagged(session.face_image_path)
                 if new_path != session.face_image_path:
                     session.face_image_path = new_path
                     moved += 1

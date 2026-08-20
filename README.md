@@ -132,7 +132,8 @@ Because it's a prefix split within one bucket rather than two buckets, a bulk "w
 SSH in and finish the `.env` the bootstrap script generated:
 ```bash
 cd /opt/venuepass
-$EDITOR .env   # set POSTGRES_PASSWORD and S3_BUCKET_NAME=venuepass-verification-images-prod
+$EDITOR .env   # set POSTGRES_PASSWORD, S3_BUCKET_NAME=venuepass-verification-images-prod,
+               # and SEED_ADMIN_PASSWORD (see step 5 below)
 ```
 `.env` is git-ignored — never commit it. If you're deploying behind a domain, also set `NEXT_PUBLIC_API_URL` to the backend's public URL (e.g. `https://api.yourdomain.com/api/v1`) — this is baked into the frontend at **build** time, so changing it later requires a rebuild (`docker compose build frontend`), not just a restart.
 
@@ -151,7 +152,7 @@ curl http://localhost:8000/ready         # backend + db + redis + ai-service con
 curl http://localhost:8001/docs          # ai-service
 curl http://localhost:3000               # frontend
 ```
-Database tables are auto-created on backend startup, and a bootstrap `super_admin` account (`admin@pub-entry.local`) is auto-seeded with a random password printed once to the backend container logs (`docker compose logs backend | grep "Bootstrap super_admin"`) — log in with it immediately and create real staff accounts via the Staff Accounts admin page, since self-registration is disabled by design.
+Database tables are auto-created on backend startup, and a bootstrap `super_admin` account is seeded from `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in `.env` (defaults: `admin@venuepass.local` / `ChangeMe123!` — see `backend/seed.py`, run via the backend service's `command:` in `docker-compose.yml` before uvicorn starts). **Set a real `SEED_ADMIN_PASSWORD` in `.env` before deploying anywhere reachable from outside your own machine** — the default is a documented value, not a secret. The seed is idempotent (only creates the account if that email doesn't already exist), so changing the password in `.env` after first boot won't retroactively update an already-created account; log in and change it from the Staff Accounts admin page instead, or update it directly in Postgres.
 
 ### 6. Put a reverse proxy in front (recommended)
 For a real domain with HTTPS, put [Caddy](https://caddyserver.com/) (or nginx + certbot) in front of ports 3000 (frontend) and 8000 (backend). A minimal `Caddyfile`:

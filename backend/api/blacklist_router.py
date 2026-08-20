@@ -4,12 +4,16 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import get_db, get_current_active_user, RoleChecker
 from backend.models.models import RoleEnum, User, Customer, Blacklist, Occupancy, Notification, AuditLog
-from backend.schemas.schemas import BlacklistCreateByCustomerId
+from backend.schemas.schemas import BlacklistCreateByCustomerId, UnbanRequest
 from backend.core.event_bus import event_bus, CH_SECURITY
 from backend.services.session_service import session_service
 
 router = APIRouter(prefix="/api/v1/blacklist", tags=["blacklist"], dependencies=[Depends(get_current_active_user)])
 require_floor_staff = RoleChecker([RoleEnum.door_staff, RoleEnum.manager, RoleEnum.venue_admin, RoleEnum.super_admin])
+# Unbanning is a bigger call than banning — lifting a security block
+# deliberately requires more authority than raising one, so this is
+# scoped tighter than require_floor_staff.
+require_supervisor = RoleChecker([RoleEnum.manager, RoleEnum.venue_admin, RoleEnum.super_admin])
 
 
 @router.post("", dependencies=[Depends(require_floor_staff)])
@@ -94,4 +98,49 @@ def create_ban(
         "blacklist_id": ban.id,
         "customer_id": customer.id,
         "currently_inside": currently_inside,
+    }
+
+
+@router.delete("/{customer_id}", dependencies=[Depends(require_supervisor)])
+def remove_ban(
+    customer_id: int,
+    req: UnbanRequest = UnbanRequest(),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lifts an active ban on a customer. Requires manager or above — a
+    deliberately higher bar than the door_staff/manager/venue_admin/
+    super_admin bar create_ban uses, since removing a security block is a
+    bigger call than raising one. Also restores the customer's images from
+    scans/flagged/ back to scans/unflagged/, since a customer who's no
+    longer banned should go back to routine retention rules rather than
+    having their photos retained permanently.
+    """
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    ban = db.query(Blacklist).filter(Blacklist.customer_id == customer_id).first()
+    if not ban:
+        raise HTTPException(status_code=404, detail="This customer has no active ban")
+
+    db.delete(ban)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="blacklist_removed",
+        details={
+            "customer_id": customer.id,
+            "reason": req.reason,
+            "unbanned_by_id": current_user.id,
+        },
+    ))
+    db.commit()
+
+    session_service.restore_customer_images(db, customer.id)
+
+    return {
+        "success": True,
+        "customer_id": customer.id,
     }

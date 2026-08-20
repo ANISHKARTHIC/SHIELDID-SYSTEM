@@ -70,10 +70,11 @@ cd "$APP_DIR"
 if [ ! -f .env ]; then
   cp .env.example .env
   # Auto-generate a real SECRET_KEY so the stack isn't left with the
-  # placeholder value; POSTGRES_PASSWORD/S3_BUCKET_NAME still need editing.
+  # placeholder value; POSTGRES_PASSWORD/S3_BUCKET_NAME/SEED_ADMIN_PASSWORD
+  # still need editing.
   SECRET_KEY_VALUE=$(openssl rand -hex 32)
   sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY_VALUE}|" .env
-  echo "Generated .env from template — edit S3_BUCKET_NAME and POSTGRES_PASSWORD before the stack will be production-ready:"
+  echo "Generated .env from template — edit S3_BUCKET_NAME, POSTGRES_PASSWORD, and SEED_ADMIN_PASSWORD before the stack will be production-ready:"
   echo "  $APP_DIR/.env"
 fi
 

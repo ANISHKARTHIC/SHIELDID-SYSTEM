@@ -252,6 +252,85 @@ class TestBlacklistBan(unittest.TestCase):
         finally:
             db.close()
 
+    def test_unban_removes_blacklist_row(self):
+        customer_id = self._create_bare_customer(unique_id="UNBAN001", name="Unban Person")
+        client.post(
+            "/api/v1/blacklist",
+            json={"customer_id": customer_id, "reason": "Initial ban"},
+            headers=self.headers,
+        )
+
+        supervisor_headers = auth_headers("testsupervisor@pub.com")
+        res = client.delete(f"/api/v1/blacklist/{customer_id}", headers=supervisor_headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["success"])
+
+        db = TestingSessionLocal()
+        try:
+            self.assertIsNone(db.query(Blacklist).filter(Blacklist.customer_id == customer_id).first())
+        finally:
+            db.close()
+
+    def test_unban_requires_manager_or_above(self):
+        # door_staff can create a ban but must not be able to lift one —
+        # unbanning is scoped to require_supervisor (manager+), a
+        # deliberately higher bar than create_ban's require_floor_staff.
+        customer_id = self._create_bare_customer(unique_id="UNBANROLE001", name="Unban Role Person")
+        client.post(
+            "/api/v1/blacklist",
+            json={"customer_id": customer_id, "reason": "Initial ban"},
+            headers=self.headers,
+        )
+
+        res = client.delete(f"/api/v1/blacklist/{customer_id}", headers=self.headers)
+        self.assertEqual(res.status_code, 403)
+
+        db = TestingSessionLocal()
+        try:
+            self.assertIsNotNone(db.query(Blacklist).filter(Blacklist.customer_id == customer_id).first())
+        finally:
+            db.close()
+
+    def test_unban_nonexistent_ban_returns_404(self):
+        customer_id = self._create_bare_customer(unique_id="NOBAN001", name="Never Banned Person")
+        supervisor_headers = auth_headers("testsupervisor@pub.com")
+        res = client.delete(f"/api/v1/blacklist/{customer_id}", headers=supervisor_headers)
+        self.assertEqual(res.status_code, 404)
+
+    def test_unban_restores_images_to_unflagged_prefix(self):
+        customer_id = self._create_bare_customer(unique_id="UNBANIMG001", name="Unban Image Person")
+        db = TestingSessionLocal()
+        try:
+            session = VerificationSession(
+                id="unban-img-session-1",
+                venue_id=1,
+                operator_id=1,
+                customer_id=customer_id,
+                id_image_path="scans/flagged/unban-img-session-1_id.jpg",
+                face_image_path="scans/flagged/unban-img-session-1_face.jpg",
+            )
+            db.add(session)
+            db.add(Blacklist(customer_id=customer_id, reason="test"))
+            db.commit()
+        finally:
+            db.close()
+
+        fake_client = MagicMock()
+        supervisor_headers = auth_headers("testsupervisor@pub.com")
+        with patch.object(storage_service_module.storage_service, "client", fake_client):
+            res = client.delete(f"/api/v1/blacklist/{customer_id}", headers=supervisor_headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(fake_client.copy_object.call_count, 2)
+        self.assertEqual(fake_client.delete_object.call_count, 2)
+
+        db = TestingSessionLocal()
+        try:
+            refreshed = db.query(VerificationSession).filter(VerificationSession.id == "unban-img-session-1").first()
+            self.assertEqual(refreshed.id_image_path, "scans/unflagged/unban-img-session-1_id.jpg")
+            self.assertEqual(refreshed.face_image_path, "scans/unflagged/unban-img-session-1_face.jpg")
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

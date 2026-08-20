@@ -70,6 +70,9 @@ class BlacklistCreateByCustomerId(BaseModel):
     manager_notes: Optional[str] = None
     expiry_date: Optional[str] = None # format YYYY-MM-DD
 
+class UnbanRequest(BaseModel):
+    reason: Optional[str] = None
+
 class IncidentCreate(BaseModel):
     customer_id: int
     incident_type: str

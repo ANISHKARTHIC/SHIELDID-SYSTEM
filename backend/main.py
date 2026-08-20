@@ -10,9 +10,6 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from backend.db.session import engine
-from backend.db.base import Base
-from backend.models import models
 from backend.api import deps
 from backend.api.v1_router import router as v1_router
 from backend.api.auth_router import router as auth_router
@@ -29,52 +26,14 @@ from backend.core.logger import get_logger
 
 logger = get_logger("main")
 
-# Auto-create tables on startup (works for SQLite and PostgreSQL)
+# Auto-create tables and seed the default venue/admin on startup (works for
+# SQLite and PostgreSQL). Shared with `python -m backend.seed`, which is the
+# same logic run standalone — see backend/seed.py for credential env vars.
 try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables initialized successfully.")
-    
-    # Auto-seed database
-    from backend.db.session import SessionLocal
-    from backend.models.models import Venue, User, RoleEnum
-    db = SessionLocal()
-    try:
-        venue = db.query(Venue).filter(Venue.id == 1).first()
-        if not venue:
-            venue = Venue(id=1, name="Default Venue", address="123 Main St")
-            db.add(venue)
-            db.commit()
-            logger.info("Default Venue (ID=1) auto-seeded.")
-
-        # Bootstrap a super_admin if none exists yet, so there's always a
-        # way in to create further staff accounts via POST /api/v1/users
-        # now that self-registration is gone.
-        existing_admin = db.query(User).filter(User.role == RoleEnum.super_admin).first()
-        if not existing_admin:
-            from backend.core.security import get_password_hash
-            import secrets
-            bootstrap_password = secrets.token_urlsafe(12)
-            admin = User(
-                venue_id=venue.id,
-                email="admin@venuepass.local",
-                hashed_password=get_password_hash(bootstrap_password),
-                role=RoleEnum.super_admin,
-                is_active=True,
-            )
-            db.add(admin)
-            db.commit()
-            logger.warning(
-                f"Bootstrap super_admin created: admin@venuepass.local / {bootstrap_password} "
-                "— log in and change this immediately."
-            )
-    except Exception as se:
-        logger.error(f"Error seeding database: {se}")
-        db.rollback()
-    finally:
-        db.close()
-
+    from backend.seed import seed
+    seed()
 except Exception as e:
-    logger.error(f"Error initializing database tables: {e}")
+    logger.error(f"Error initializing/seeding database: {e}")
 
 from contextlib import asynccontextmanager
 from backend.services.retention_cron import start_retention_cron

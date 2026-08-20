@@ -586,12 +586,19 @@ async def flush_data(db: Session = Depends(get_db)):
             storage_service.delete_image(session.face_image_path)
 
     try:
+        # Occupancy rows reference both customers and sessions via FK, so
+        # they must go first — otherwise deleting the sessions/customers
+        # below violates occupancy_records_session_id_fkey /
+        # occupancy_records_customer_id_fkey.
+        if expendable_customer_ids:
+            db.query(Occupancy).filter(Occupancy.customer_id.in_(expendable_customer_ids)).delete(synchronize_session=False)
+
         # Delete related to sessions
         if expendable_session_ids:
             db.query(SessionAuditLog).filter(SessionAuditLog.session_id.in_(expendable_session_ids)).delete(synchronize_session=False)
             db.query(SupervisorNote).filter(SupervisorNote.session_id.in_(expendable_session_ids)).delete(synchronize_session=False)
             db.query(VerificationSession).filter(VerificationSession.id.in_(expendable_session_ids)).delete(synchronize_session=False)
-            
+
         # Delete related to customers
         if expendable_customer_ids:
             db.query(Document).filter(Document.customer_id.in_(expendable_customer_ids)).delete(synchronize_session=False)
