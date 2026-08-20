@@ -28,7 +28,7 @@ USER appuser
 
 EXPOSE 8001
 
-HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=120s --retries=10 \
     CMD curl -f http://localhost:8001/docs || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]
