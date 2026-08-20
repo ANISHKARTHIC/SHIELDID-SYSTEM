@@ -21,8 +21,18 @@ class DioClient {
     dio = Dio(
       BaseOptions(
         baseUrl: AppConfig.defaultBaseUrl,
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+        // Connecting shouldn't take long even on a slow box, but a
+        // t3.micro deployment's AI service can be swap-thrashing its
+        // model weights back in after any idle period, so a generous
+        // margin here avoids a false "can't connect" on a host that's
+        // simply slow to accept the TCP connection under memory pressure.
+        connectTimeout: const Duration(seconds: 30),
+        // Covers ordinary JSON endpoints (login, stats, history,
+        // notifications, etc). classifyDocument/extractOCR/verifyFace in
+        // RemoteDataSource override this per-call — the backend itself
+        // allows up to 180s for those three since they're the ones that
+        // actually invoke AI inference.
+        receiveTimeout: const Duration(seconds: 30),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -91,8 +101,13 @@ class DioClient {
       final targetUrl = testUrl ?? dio.options.baseUrl;
       final tempDio = Dio(
         BaseOptions(
-          connectTimeout: const Duration(seconds: 5),
-          receiveTimeout: const Duration(seconds: 5),
+          // /operator/stats itself is cheap (no AI involved), but on a
+          // t3.micro deployment the backend process can still be slow to
+          // respond under memory pressure from ai-service — 5s was tight
+          // enough to report "can't connect" on a backend that was really
+          // just momentarily slow.
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
         ),
       );
       final response = await tempDio.get('$targetUrl/operator/stats');

@@ -4,6 +4,14 @@ import '../../../../core/network/dio_client.dart';
 class RemoteDataSource {
   final Dio _dio = DioClient().dio;
 
+  // classifyDocument/extractOCR/verifyFace are the three calls that
+  // actually invoke AI inference server-side — the backend allows up to
+  // 180s for each of these specifically (see backend/api/v1_router.py),
+  // well beyond DioClient's general-purpose default, since a t3.micro
+  // deployment's ai-service can be slow to respond while its model
+  // weights page back in from swap after any idle period.
+  static const _aiCallTimeout = Duration(seconds: 190);
+
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await _dio.post(
       '/auth/login',
@@ -20,8 +28,12 @@ class RemoteDataSource {
     final rootUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
     final response = await Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 5),
+        // The backend's own ai_service probe inside /ready uses a 5s
+        // timeout (backend/main.py), plus its own connect/response time on
+        // top — 10s here gives that a realistic chance to complete rather
+        // than the client giving up first on a t3.micro under load.
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
       ),
     ).get('$rootUrl/ready');
     return response.data as Map<String, dynamic>;
@@ -47,6 +59,10 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/classify',
       data: formData,
+      options: Options(
+        sendTimeout: _aiCallTimeout,
+        receiveTimeout: _aiCallTimeout,
+      ),
     );
     return response.data;
   }
@@ -58,7 +74,14 @@ class RemoteDataSource {
     final file = await MultipartFile.fromFile(imagePath, filename: 'id.jpg');
     final formData = FormData.fromMap({'file': file});
 
-    final response = await _dio.post('/session/$sessionId/ocr', data: formData);
+    final response = await _dio.post(
+      '/session/$sessionId/ocr',
+      data: formData,
+      options: Options(
+        sendTimeout: _aiCallTimeout,
+        receiveTimeout: _aiCallTimeout,
+      ),
+    );
     return response.data;
   }
 
@@ -75,6 +98,10 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/face',
       data: formData,
+      options: Options(
+        sendTimeout: _aiCallTimeout,
+        receiveTimeout: _aiCallTimeout,
+      ),
     );
     return response.data;
   }

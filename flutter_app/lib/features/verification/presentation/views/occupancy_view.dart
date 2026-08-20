@@ -24,7 +24,10 @@ class _OccupancyViewState extends State<OccupancyView> {
   void initState() {
     super.initState();
     _fetch();
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _fetch());
+    // 10s: who's-currently-inside is operationally live-relevant for door
+    // staff, but 3s was excessive load for a t3.micro backend — matches
+    // the admin console's own occupancy polling interval.
+    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetch());
   }
 
   @override

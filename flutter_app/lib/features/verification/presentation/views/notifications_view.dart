@@ -26,11 +26,11 @@ class _NotificationsViewState extends State<NotificationsView> {
   void initState() {
     super.initState();
     _fetchNotifications();
-    // An in-venue ban alert needs to reach on-floor staff within seconds,
-    // not only when they happen to reopen this tab — matches the admin
-    // console's existing 3s polling interval.
+    // 10s: an in-venue ban alert is time-sensitive enough to poll faster
+    // than routine list views, but 3s was excessive load for a t3.micro
+    // backend — matches the admin console's own notifications interval.
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 3),
+      const Duration(seconds: 10),
       (_) => _fetchNotifications(),
     );
   }
