@@ -8,15 +8,18 @@ from backend.core.config import settings
 
 class EventBus:
     def __init__(self):
-        from redis import Redis
-        import os
-        redis_url = os.getenv("REDIS_URL", settings.REDIS_URL)
-        if redis_url:
-            self.redis_client = Redis.from_url(redis_url, decode_responses=True)
-        else:
-            redis_host = os.getenv("REDIS_HOST", "redis")
-            redis_port = int(os.getenv("REDIS_PORT", 6379))
-            self.redis_client = Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        self._client = None
+
+    @property
+    def redis_client(self):
+        if self._client is None:
+            from redis import Redis
+            import os
+            url = os.getenv("REDIS_URL") or settings.REDIS_URL
+            if os.getenv("POSTGRES_SERVER") == "db" and "localhost" in url:
+                url = url.replace("localhost", "redis")
+            self._client = Redis.from_url(url, decode_responses=True)
+        return self._client
 
     def publish(self, channel: str, event_type: str, payload: dict):
         """

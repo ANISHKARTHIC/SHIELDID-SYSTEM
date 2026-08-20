@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: str = "5432"
     POSTGRES_DB: str = "pub_entry_db"
     
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0"
 
     # --- Object storage (S3 / S3-compatible) ---
     # In AWS, leave S3_ENDPOINT_URL unset so boto3 talks to real AWS S3 and
