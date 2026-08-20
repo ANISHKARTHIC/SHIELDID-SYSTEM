@@ -18,12 +18,15 @@ router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_us
 
 def get_ai_service_url() -> str:
     import os
-    url = os.getenv("AI_SERVICE_URL") or settings.AI_SERVICE_URL
-    if os.getenv("POSTGRES_SERVER") == "db" and "localhost" in url:
+    env_url = os.getenv("AI_SERVICE_URL")
+    if env_url and "localhost" not in env_url:
+        return env_url
+    if os.getenv("POSTGRES_SERVER") == "db":
+        return "http://ai-service:8001"
+    url = settings.AI_SERVICE_URL
+    if "localhost" in url:
         url = url.replace("localhost", "ai-service")
     return url
-
-AI_SERVICE_URL = get_ai_service_url()
 
 @router.post("/session/start")
 async def start_session(
@@ -90,11 +93,11 @@ async def classify_document(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-    # Call AI Service
+    ai_url = get_ai_service_url()
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/classify", files=files, timeout=180.0)
+            response = await client.post(f"{ai_url}/classify", files=files, timeout=180.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Document classification is taking too long. Please try again.")
         except httpx.ConnectError:
@@ -132,10 +135,11 @@ async def extract_ocr(
         
     file_bytes = await file.read()
     document_type = session_data.get("classification", {}).get("document_type", "uk_driving_licence")
+    ai_url = get_ai_service_url()
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/ocr", files=files, params={"document_type": document_type}, timeout=180.0)
+            response = await client.post(f"{ai_url}/ocr", files=files, params={"document_type": document_type}, timeout=180.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Text extraction is taking too long. Please try again.")
         except httpx.ConnectError:
@@ -204,11 +208,12 @@ async def face_match(
     if customer is not None and customer.face_embedding is not None:
         reference_embedding = json.dumps([float(x) for x in customer.face_embedding])
 
+    ai_url = get_ai_service_url()
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         data = {'reference_embedding': reference_embedding} if reference_embedding else {}
         try:
-            response = await client.post(f"{AI_SERVICE_URL}/face-match", files=files, data=data, timeout=180.0)
+            response = await client.post(f"{ai_url}/face-match", files=files, data=data, timeout=180.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Face verification is taking too long. Please try again.")
         except httpx.ConnectError:
