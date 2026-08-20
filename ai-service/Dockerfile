@@ -20,12 +20,7 @@ COPY . .
 # first-boot download/internet dependency in production.
 ENV INSIGHTFACE_MODEL_ROOT=/app/model_cache/insightface
 ENV EASYOCR_MODEL_DIR=/app/model_cache/easyocr
-RUN python -c "\
-    from app.services.providers.insightface_provider import InsightFaceProvider; \
-    from app.services.ocr.easy_ocr_provider import EasyOCRProvider; \
-    InsightFaceProvider().load_model(); \
-    EasyOCRProvider()._get_reader(); \
-    print('Model warm-up complete.')"
+RUN python -c "from app.services.providers.insightface_provider import InsightFaceProvider; from app.services.ocr.easy_ocr_provider import EasyOCRProvider; InsightFaceProvider().load_model(); EasyOCRProvider()._get_reader(); print('Model warm-up complete.')"
 
 RUN useradd --create-home --uid 1000 appuser \
     && chown -R appuser:appuser /app
