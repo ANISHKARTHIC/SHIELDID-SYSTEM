@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str | None = None
     S3_USE_PATH_STYLE: bool = False  # MinIO requires path-style addressing
 
+    # Standard AWS-named vars — accepted so a plain IAM user access key pair
+    # (as opposed to an instance-role deployment) can be dropped straight
+    # into .env without renaming to the S3_-prefixed vars above.
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
+
     # Legacy MinIO-named vars kept as fallbacks so existing .env files/compose
     # configs keep working without edits.
     MINIO_ENDPOINT: str | None = None
@@ -62,11 +68,11 @@ class Settings(BaseSettings):
 
     @property
     def resolved_s3_access_key(self) -> str | None:
-        return self.S3_ACCESS_KEY_ID or self.MINIO_ACCESS_KEY
+        return self.S3_ACCESS_KEY_ID or self.AWS_ACCESS_KEY_ID or self.MINIO_ACCESS_KEY
 
     @property
     def resolved_s3_secret_key(self) -> str | None:
-        return self.S3_SECRET_ACCESS_KEY or self.MINIO_SECRET_KEY
+        return self.S3_SECRET_ACCESS_KEY or self.AWS_SECRET_ACCESS_KEY or self.MINIO_SECRET_KEY
 
     @property
     def resolved_s3_path_style(self) -> bool:
@@ -74,6 +80,12 @@ class Settings(BaseSettings):
         # real AWS S3 uses virtual-hosted style.
         return self.S3_USE_PATH_STYLE or self.resolved_s3_endpoint_url is not None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Resolved relative to this file (backend/core/config.py -> backend/.env)
+    # rather than the process's cwd, so `.env` loads correctly whether the
+    # app is launched from the repo root, from backend/, or via Docker.
+    model_config = SettingsConfigDict(
+        env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        extra="ignore",
+    )
 
 settings = Settings()

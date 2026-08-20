@@ -18,6 +18,14 @@ from backend.api.deps import get_db
 from backend.core.security import get_password_hash
 from backend.main import app
 
+# The test suite must never touch real cloud storage, even if a developer's
+# .env has live AWS credentials in it for manual testing — force the
+# singleton's client to None so upload/delete/move calls always take the
+# no-op path unless a test explicitly opts into a mocked client via
+# unittest.mock.patch.object(storage_service, "client", ...).
+from backend.services.storage_service import storage_service as _storage_service
+_storage_service.client = None
+
 # Test SQLite DB in-memory with StaticPool
 TEST_DB_URL = "sqlite:///:memory:"
 engine = create_engine(

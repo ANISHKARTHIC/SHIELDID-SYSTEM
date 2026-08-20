@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from backend.models.models import VerificationSession, SessionAuditLog, SessionStateEnum
 from backend.core.event_bus import event_bus, CH_VERIFICATIONS
+from backend.services.storage_service import storage_service
 from datetime import datetime, timezone
 import uuid
 
@@ -86,5 +87,36 @@ class SessionService:
         db.commit()
         db.refresh(session)
         return session
+
+    def quarantine_customer_images(self, db: Session, customer_id: int) -> int:
+        """
+        Moves every id/face image belonging to this customer's sessions from
+        the normal/ S3 prefix to banned/, and updates the stored paths to
+        match. Called whenever a ban is created — whether auto-detected
+        mid-session (face_match) or applied standalone against a past
+        visitor (blacklist_router) — so a banned customer's images always
+        end up isolated from routine retention/export operations that only
+        target normal/. Bypasses the is_locked check that update_session_data
+        enforces, since a finalized/locked session's images still need to be
+        movable when a ban comes later.
+
+        Returns the number of image objects moved.
+        """
+        sessions = db.query(VerificationSession).filter(VerificationSession.customer_id == customer_id).all()
+        moved = 0
+        for session in sessions:
+            if session.id_image_path:
+                new_path = storage_service.move_to_banned(session.id_image_path)
+                if new_path != session.id_image_path:
+                    session.id_image_path = new_path
+                    moved += 1
+            if session.face_image_path:
+                new_path = storage_service.move_to_banned(session.face_image_path)
+                if new_path != session.face_image_path:
+                    session.face_image_path = new_path
+                    moved += 1
+        if moved:
+            db.commit()
+        return moved
 
 session_service = SessionService()

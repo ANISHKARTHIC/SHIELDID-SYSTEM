@@ -6,6 +6,7 @@ from backend.api.deps import get_db, get_current_active_user, RoleChecker
 from backend.models.models import RoleEnum, User, Customer, Blacklist, Occupancy, Notification, AuditLog
 from backend.schemas.schemas import BlacklistCreateByCustomerId
 from backend.core.event_bus import event_bus, CH_SECURITY
+from backend.services.session_service import session_service
 
 router = APIRouter(prefix="/api/v1/blacklist", tags=["blacklist"], dependencies=[Depends(get_current_active_user)])
 require_floor_staff = RoleChecker([RoleEnum.door_staff, RoleEnum.manager, RoleEnum.venue_admin, RoleEnum.super_admin])
@@ -85,6 +86,8 @@ def create_ban(
         },
     ))
     db.commit()
+
+    session_service.quarantine_customer_images(db, customer.id)
 
     return {
         "success": True,

@@ -116,6 +116,12 @@ aws iam add-role-to-instance-profile --instance-profile-name venuepass-ec2-profi
 ```
 No access keys are stored anywhere — `backend/services/storage_service.py` picks up credentials from this instance profile automatically via boto3's default credential chain.
 
+Verification images are keyed into two prefixes inside the one bucket, not two buckets — `storage_service.py` handles this automatically:
+- **`scans/unflagged/`** — every image starts here. Routine retention (the hourly cron and the `/admin/flush` endpoint) deletes freely from this prefix, and the bucket lifecycle rule above force-expires anything left here after 7 days.
+- **`scans/flagged/`** — the moment a customer is blacklisted (auto-detected mid-verification, a manual BLOCK/RESTRICT decision, or a standalone ban against a past visitor), every image belonging to that customer — across all their past sessions — is moved here via `move_to_banned`/`quarantine_customer_images`. Nothing under `scans/flagged/` is ever touched by retention or `/admin/flush`, and the lifecycle rule has no expiration for this prefix — flagged customers' images are retained permanently, by design.
+
+Because it's a prefix split within one bucket rather than two buckets, a bulk "wipe everything routine" operation is just `aws s3 rm s3://<bucket>/scans/unflagged/ --recursive` — `scans/flagged/` is structurally untouched by that command.
+
 ### 2. Launch the EC2 instance
 - **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in model weights is large).
 - **IAM instance profile**: `venuepass-ec2-profile` from step 1.
@@ -158,7 +164,7 @@ yourdomain.com {
 Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same t3.medium alongside the compose stack.
 
 ### Notes
-- **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires objects after 30 days regardless.
+- **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires `scans/unflagged/` objects after 7 days regardless — flagged customers' images (`scans/flagged/`) are exempt from both the cron and the lifecycle rule, by design.
 - **Resource limits**: every service in `docker-compose.yml` has a `deploy.resources.limits.memory` cap so one runaway container (most likely `ai-service` under burst load) can't OOM the whole box; Docker will restart a container that hits its cap rather than letting the kernel OOM-killer pick a victim.
 - **Restart on reboot**: `restart: unless-stopped` handles container crashes, but a full instance reboot needs the Docker daemon to come up and then `docker compose up` to run again — that's what the `venuepass.service` systemd unit from the bootstrap script does. Verify it after first boot with `systemctl status venuepass`.
 - **`start_services.sh`** (podman-based, ports 5433/6380) is superseded by `docker-compose.yml` for production; kept only for local non-Docker development.

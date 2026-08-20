@@ -1,11 +1,23 @@
 {
   "Rules": [
     {
-      "ID": "expire-verification-images",
+      "ID": "expire-unflagged-verification-images",
       "Status": "Enabled",
-      "Filter": {},
+      "Filter": {
+        "Prefix": "scans/unflagged/"
+      },
       "Expiration": {
-        "Days": 30
+        "Days": 7
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    },
+    {
+      "ID": "abort-incomplete-flagged-uploads",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "scans/flagged/"
       },
       "AbortIncompleteMultipartUpload": {
         "DaysAfterInitiation": 7

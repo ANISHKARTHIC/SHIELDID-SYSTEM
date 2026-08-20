@@ -1,8 +1,10 @@
 import unittest
 import json
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 from backend.tests.conftest import client, init_test_db, TestingSessionLocal, auth_headers
 from backend.models.models import Customer, Blacklist, Notification, Occupancy, VerificationSession
+from backend.services import storage_service as storage_service_module
 
 
 def _finalize_pass_session(headers, unique_id, name):
@@ -164,6 +166,91 @@ class TestBlacklistBan(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(res.status_code, 200)
+
+    def test_standalone_ban_moves_images_to_banned_prefix(self):
+        # A ban created against a past visitor (not mid-session) must still
+        # relocate that customer's stored S3 images from scans/unflagged/ to
+        # scans/flagged/ so bulk retention/flush operations scoped to
+        # scans/unflagged/ never touch a banned customer's photos.
+        # storage_service.client is None in this test env (no real S3/MinIO),
+        # so move_to_banned would normally no-op — fake a minimal boto3
+        # client to exercise the real copy+delete path.
+        customer_id = self._create_bare_customer(unique_id="IMGBAN001", name="Image Ban Person")
+        db = TestingSessionLocal()
+        try:
+            session = VerificationSession(
+                id="imgban-session-1",
+                venue_id=1,
+                operator_id=1,
+                customer_id=customer_id,
+                id_image_path="scans/unflagged/imgban-session-1_id.jpg",
+                face_image_path="scans/unflagged/imgban-session-1_face.jpg",
+            )
+            db.add(session)
+            db.commit()
+        finally:
+            db.close()
+
+        fake_client = MagicMock()
+        with patch.object(storage_service_module.storage_service, "client", fake_client):
+            res = client.post(
+                "/api/v1/blacklist",
+                json={"customer_id": customer_id, "reason": "Reported fake ID"},
+                headers=self.headers,
+            )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(fake_client.copy_object.call_count, 2)
+        self.assertEqual(fake_client.delete_object.call_count, 2)
+
+        db = TestingSessionLocal()
+        try:
+            refreshed = db.query(VerificationSession).filter(VerificationSession.id == "imgban-session-1").first()
+            self.assertEqual(refreshed.id_image_path, "scans/flagged/imgban-session-1_id.jpg")
+            self.assertEqual(refreshed.face_image_path, "scans/flagged/imgban-session-1_face.jpg")
+        finally:
+            db.close()
+
+    def test_finalize_block_moves_images_to_banned_prefix(self):
+        # The inline BLOCK-at-the-door path must also quarantine images,
+        # not just the standalone /blacklist endpoint.
+        from backend.db.redis import get_redis
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+        session_state = {
+            "step": 3,
+            "status": "ready",
+            "session_id": session_id,
+            "ocr": {"document_number": "BLOCKIMG850505CD8KL", "name": "Block Image Person", "dob": "1985-05-05"},
+            "embedding": [0.2] * 512,
+            "validation": {"is_valid": True},
+        }
+        next(get_redis()).set(f"session:{session_id}", json.dumps(session_state))
+
+        db = TestingSessionLocal()
+        try:
+            row = db.query(VerificationSession).filter(VerificationSession.id == session_id).first()
+            row.id_image_path = f"scans/unflagged/{session_id}_id.jpg"
+            row.face_image_path = f"scans/unflagged/{session_id}_face.jpg"
+            db.commit()
+        finally:
+            db.close()
+
+        fake_client = MagicMock()
+        with patch.object(storage_service_module.storage_service, "client", fake_client):
+            res = client.post(
+                f"/api/v1/session/{session_id}/finalize",
+                json={"staff_decision": "BLOCK", "notes": "Fighting"},
+                headers=self.headers,
+            )
+        self.assertEqual(res.status_code, 200)
+
+        db = TestingSessionLocal()
+        try:
+            refreshed = db.query(VerificationSession).filter(VerificationSession.id == session_id).first()
+            self.assertEqual(refreshed.id_image_path, f"scans/flagged/{session_id}_id.jpg")
+            self.assertEqual(refreshed.face_image_path, f"scans/flagged/{session_id}_face.jpg")
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

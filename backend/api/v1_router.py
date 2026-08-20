@@ -63,15 +63,18 @@ async def classify_document(
     session_data = json.loads(session_data_str)
     
     file_bytes = await file.read()
-    
-    # Save to MinIO for session duration
+
+    # Save to S3 for session duration. Ban status isn't known yet at this
+    # step (OCR/face-match haven't run), so this always lands under
+    # normal/ — quarantine_customer_images moves it to banned/ later if
+    # this turns out to be a repeat offender.
     object_name = f"{session_id}_id.jpg"
     import tempfile
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
-    storage_service.upload_image(tmp_path, object_name)
-    
+    object_name = storage_service.upload_image(tmp_path, object_name) or object_name
+
     # Update state
     try:
         session_service.update_session_data(db, session_id, {"id_image_path": object_name})
@@ -166,13 +169,15 @@ async def face_match(
 
     file_bytes = await file.read()
 
-    # Save face to MinIO
+    # Save face to S3, under normal/ — blacklist status is resolved further
+    # down in this same request; quarantine_customer_images moves this to
+    # banned/ if it turns out the customer is blacklisted.
     object_name = f"{session_id}_face.jpg"
     import tempfile
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
-    storage_service.upload_image(tmp_path, object_name)
+    object_name = storage_service.upload_image(tmp_path, object_name) or object_name
     session_data["face_image"] = object_name
 
     try:
@@ -258,6 +263,9 @@ async def face_match(
                 explainability["policy_trigger"] = "BLACKLIST"
                 session_service.update_session_data(db, session_id, {"final_decision": "blocked", "customer_id": customer.id})
                 session_service.transition_state(db, session_id, SessionStateEnum.DENIED)
+                # Known repeat offender caught mid-session — move this and
+                # any past session's images into banned/ immediately.
+                session_service.quarantine_customer_images(db, customer.id)
             elif not session_data["validation"].get("is_valid"):
                 decision = "CHECK"
                 explainability["policy_trigger"] = "INVALID_DOCUMENT"
@@ -381,6 +389,7 @@ async def finalize_session(
     )
     db.add(document)
     db.commit()
+    new_ban_created = False
     if final_decision_str == "pass":
         final_state = SessionStateEnum.APPROVED
     elif final_decision_str == "deny":
@@ -397,14 +406,21 @@ async def finalize_session(
             )
             db.add(new_ban)
             db.commit()
+            new_ban_created = True
     else:
         final_state = SessionStateEnum.FRAUD_REVIEW
-        
+
     try:
+        # customer_id must be linked to this session before quarantining,
+        # since quarantine_customer_images looks up images by customer_id —
+        # this session's own id/face images wouldn't otherwise be found yet.
         session_service.update_session_data(db, session_id, {"final_decision": final_decision_str, "customer_id": customer.id})
         session_service.transition_state(db, session_id, final_state)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    if new_ban_created:
+        session_service.quarantine_customer_images(db, customer.id)
 
     if final_state == SessionStateEnum.APPROVED:
         # Person is now inside the venue — separate table from
@@ -553,11 +569,22 @@ async def flush_data(db: Session = Depends(get_db)):
     
     # Query expendable sessions
     expendable_sessions = db.query(VerificationSession).filter(
-        (VerificationSession.customer_id.in_(expendable_customer_ids)) | 
+        (VerificationSession.customer_id.in_(expendable_customer_ids)) |
         (VerificationSession.customer_id == None)
     ).all()
     expendable_session_ids = [s.id for s in expendable_sessions]
-    
+
+    # Delete the S3 objects themselves before dropping the DB rows that
+    # reference them — otherwise a flush only clears Postgres and leaves
+    # every non-banned image sitting in the normal/ prefix forever. Banned
+    # customers are already excluded above, so nothing under banned/ is
+    # ever touched here.
+    for session in expendable_sessions:
+        if session.id_image_path:
+            storage_service.delete_image(session.id_image_path)
+        if session.face_image_path:
+            storage_service.delete_image(session.face_image_path)
+
     try:
         # Delete related to sessions
         if expendable_session_ids:
