@@ -16,6 +16,26 @@ class TestSessionEndpoints(unittest.TestCase):
         self.assertIn("session_id", data)
         self.assertTrue(len(data["session_id"]) > 10)
 
+    def test_face_before_ocr_returns_400_not_500(self):
+        # Regression: /session/{id}/face used to read session_data["ocr"]
+        # unconditionally, which raised a raw KeyError (surfaced as an
+        # opaque 500) if called before /ocr ever ran. Every other
+        # step-order violation in this flow (e.g. /ocr before /classify)
+        # already returns a clean 400 — /face should too.
+        from backend.db.redis import get_redis
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+        session_state = {"step": 1, "status": "started", "session_id": session_id}
+        next(get_redis()).set(f"session:{session_id}", json.dumps(session_state))
+
+        response = client.post(
+            f"/api/v1/session/{session_id}/face",
+            files={"file": ("face.jpg", b"fake-image-bytes", "image/jpeg")},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("OCR", response.json()["detail"])
+
     def test_operator_stats(self):
         # Start a session
         start_res = client.post("/api/v1/session/start", headers=self.headers)
