@@ -100,13 +100,26 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 
 ---
 
-## 🚀 Production Deployment (Docker Compose on EC2 t3.medium)
+## 🚀 Production Deployment (Docker Compose on EC2)
 
-`db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized to fit a **t3.medium (2 vCPU / 4GB RAM)**. Verification images go straight to real **S3** — there is no local object-storage container to run or back up. Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on.
+**This branch (`fix/ai-service-connectivity`) is tuned for a t3.micro free-tier demo box.** `main` targets a real t3.medium+ instance with full-power settings (`buffalo_l` InsightFace, generous per-service memory limits) — use `main` for anything beyond a free-tier demo. The two branches intentionally carry different `docker-compose.yml`/`ai-service/Dockerfile` tuning; don't merge one's sizing into the other.
 
-**t3.medium is the minimum, not a suggestion.** `ai-service` alone (InsightFace + EasyOCR + PyTorch CPU) commonly needs 1.5-2.5GB of real memory once its models are loaded — it will not run on a `t3.micro`/`t2.micro` (1GB RAM) or `t3.small`/`t2.small` (2GB RAM) even with a large swap file added. Swap does not substitute for RAM here: an ML inference workload constantly touching its model weights will page-thrash on swap badly enough that requests time out rather than complete, which surfaces as `/ready` reporting `"ai_service": "error: All connection attempts failed"` even though the container is technically running — it's just too slow to ever answer within any reasonable timeout. If you're on a smaller instance and see that error, upgrading instance size (not touching config) is the fix.
+`db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`. Verification images go straight to real **S3** — there is no local object-storage container to run or back up.
 
-t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, move to an `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+### This branch: t3.micro (1 vCPU / 1GB RAM + swap)
+`ai-service` alone (InsightFace + EasyOCR + PyTorch CPU) commonly needs 1.5-2.5GB of real memory with the full `buffalo_l` model pack — nowhere close to fitting in 1GB. This branch instead:
+- Builds `ai-service` with the smaller `buffalo_s` InsightFace pack (~160MB vs ~600MB) at a 320px detector input instead of 640px (`INSIGHTFACE_MODEL_PACK`/`INSIGHTFACE_DET_SIZE` build args in `docker-compose.yml` → `ai-service/Dockerfile`) — measured peak RSS for just loading this pack is **~615MB**, still most of the box.
+- Trims every other service (`db`/`redis`/`backend`/`frontend`) to its practical floor — see the comment block at the top of `docker-compose.yml` for the exact budget — so ai-service gets whatever real RAM is left, plus a 4GB swap file as working memory (not just insurance — see [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh), which uses `vm.swappiness=60`, deliberately higher than the t3.medium script's `10`).
+- Runs `ai-service` with `OMP_NUM_THREADS=1`/`ORT_NUM_THREADS=1` and `ai-service` has **no hard memory limit** in compose (only a reservation) — capping it tightly would just get it OOM-killed by Docker instead of letting the kernel swap it out, which defeats the point of accepting the swap trade-off.
+- **Expect it to be slow.** The first request after a cold start (or after any idle period long enough for pages to get swapped back out) will be noticeably slower while model weights page back in from swap. This is the accepted trade-off for running real inference on free-tier hardware, not a bug — if you see `/ready` report `"ai_service": "error: ..."` immediately after starting the stack, that's very likely still-loading, not broken; give it a couple of minutes and retry before assuming something's wrong.
+- Launch with [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh) instead of the t3.medium script referenced below.
+
+### `main`: t3.medium (2 vCPU / 4GB RAM) — recommended for anything beyond a demo
+Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh)) is a backstop for transient spikes, not something the stack is expected to lean on. `ai-service` uses the full `buffalo_l` pack at 640px and isn't memory-starved the way this branch's build is.
+
+t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to threads via `OMP_NUM_THREADS`/`ORT_NUM_THREADS` (2 on `main`, 1 on this branch) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly on `main`, move to a `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+
+The rest of this section (S3 setup, secrets, verification) applies to both branches identically — only the instance type/user-data script and the two files called out above differ.
 
 ### 1. Create the S3 bucket and IAM role
 ```bash
@@ -134,10 +147,10 @@ Verification images are keyed into two prefixes inside the one bucket, not two b
 Because it's a prefix split within one bucket rather than two buckets, a bulk "wipe everything routine" operation is just `aws s3 rm s3://<bucket>/scans/unflagged/ --recursive` — `scans/flagged/` is structurally untouched by that command.
 
 ### 2. Launch the EC2 instance
-- **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in model weights is large).
+- **Type**: on this branch, `t3.micro` (free-tier eligible), ≥20GB gp2/gp3 root volume; on `main`, `t3.medium`, ≥30GB gp3 (the `ai-service` image with baked-in model weights is large either way).
 - **IAM instance profile**: `venuepass-ec2-profile` from step 1.
 - **Security group**: 22 (SSH, your IP only), 80/443 if fronting with a reverse proxy (recommended, see step 5) or 3000/8000 directly otherwise. Nothing else public — `docker-compose.yml` binds Postgres/Redis/ai-service to `127.0.0.1` so they're unreachable outside the box regardless.
-- **User data**: paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top first). It installs Docker, adds a 2GB swap file, clones the repo, and registers a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
+- **User data**: on this branch, paste [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh); on `main`, paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top of either first). Both install Docker, add a swap file (4GB here, 2GB on `main`), clone the repo, and register a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
 
 ### 3. Configure secrets
 SSH in and finish the `.env` the bootstrap script generated:
@@ -152,7 +165,7 @@ $EDITOR .env   # set POSTGRES_PASSWORD, S3_BUCKET_NAME=venuepass-verification-im
 ```bash
 docker compose up -d --build
 ```
-First build downloads and bakes in the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency. Expect this to take longer on a t3.medium than on a beefier dev machine; it's a one-time cost per image rebuild.
+First build downloads and bakes in the InsightFace (`buffalo_s` on this branch ~160MB, `buffalo_l` on `main` ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency. Expect this to take considerably longer on a t3.micro than on a beefier dev machine, both for the build itself and for pip installing torch — it's a one-time cost per image rebuild, but budget real time for it on first deploy.
 
 ### 5. Verify
 ```bash
