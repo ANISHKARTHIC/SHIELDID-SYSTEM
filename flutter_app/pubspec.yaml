@@ -39,8 +39,35 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   build_runner: ^2.15.1
   riverpod_generator: ^4.0.4
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.6
 
 flutter:
   uses-material-design: true
   assets:
     - assets/animations/
+    - assets/branding/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/branding/app_icon_1024.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0A0A0B"
+  adaptive_icon_foreground: "assets/branding/app_icon_1024.png"
+  web:
+    generate: true
+    image_path: "assets/branding/app_icon_1024_opaque.png"
+    background_color: "#0A0A0B"
+    theme_color: "#0A0A0B"
+
+flutter_native_splash:
+  color: "#0A0A0B"
+  image: "assets/branding/logo_transparent_512.png"
+  color_dark: "#0A0A0B"
+  image_dark: "assets/branding/logo_transparent_512.png"
+  android_12:
+    color: "#0A0A0B"
+    image: "assets/branding/logo_transparent_512.png"
+    color_dark: "#0A0A0B"
+    image_dark: "assets/branding/logo_transparent_512.png"

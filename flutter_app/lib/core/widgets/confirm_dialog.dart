@@ -55,7 +55,13 @@ Future<bool?> showAppConfirmDialog(
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(cancelLabel, style: TextStyle(color: colors.muted, fontWeight: FontWeight.w700)),
+            child: Text(
+              cancelLabel,
+              style: TextStyle(
+                color: colors.muted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),

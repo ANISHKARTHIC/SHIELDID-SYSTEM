@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/security/token_storage.dart';
 import '../../../../core/security/biometric_auth_service.dart';
@@ -55,12 +56,18 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   }
 
   Future<void> _toggleBiometric(bool value) async {
+    HapticFeedback.selectionClick();
     if (value) {
       final success = await BiometricAuthService.authenticate(
         reason: 'Confirm biometric unlock for VenuePass',
       );
       if (!success) {
-        if (mounted) showAppErrorSnackBar(context, 'Could not verify biometrics. Not enabled.');
+        if (mounted) {
+          showAppErrorSnackBar(
+            context,
+            'Could not verify biometrics. Not enabled.',
+          );
+        }
         return;
       }
     }
@@ -69,6 +76,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   }
 
   Future<void> _confirmLogout() async {
+    HapticFeedback.selectionClick();
     final confirmed = await showAppConfirmDialog(
       context,
       title: 'Sign out?',
@@ -121,7 +129,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   children: [
                     Text(
                       _email ?? '—',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: colors.ink),
+                      style: AppTypography.headline.copyWith(color: colors.ink),
                     ),
                     const SizedBox(height: 4),
                     StatusPill(label: _formatRole(_role), color: colors.muted),
@@ -135,7 +143,10 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
           const SizedBox(height: 22),
           Text(
             'PREFERENCES',
-            style: TextStyle(color: colors.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.06),
+            style: AppTypography.caption.copyWith(
+              color: colors.muted,
+              letterSpacing: 0.06,
+            ),
           ),
           const SizedBox(height: 6),
           _buildPrefRow(
@@ -144,9 +155,10 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
             title: 'Dark Mode',
             value: themeMode == ThemeMode.dark,
             onChanged: (value) {
-              ref.read(themeModeProvider.notifier).setMode(
-                    value ? ThemeMode.dark : ThemeMode.light,
-                  );
+              HapticFeedback.selectionClick();
+              ref
+                  .read(themeModeProvider.notifier)
+                  .setMode(value ? ThemeMode.dark : ThemeMode.light);
             },
           ),
           Divider(color: colors.line, height: 1),
@@ -157,8 +169,8 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
             subtitle: _checkingBiometric
                 ? null
                 : (_biometricAvailable
-                    ? 'Adds a device-local check'
-                    : 'Unavailable on this device'),
+                      ? 'Adds a device-local check'
+                      : 'Unavailable on this device'),
             value: _biometricEnabled,
             onChanged: _biometricAvailable ? _toggleBiometric : null,
           ),
@@ -174,7 +186,10 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   const SizedBox(width: 12),
                   Text(
                     'Sign Out',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: colors.danger, fontSize: 14),
+                    style: AppTypography.callout.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: colors.danger,
+                    ),
                   ),
                 ],
               ),
@@ -206,15 +221,20 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    fontSize: 14,
+                  style: AppTypography.callout.copyWith(
                     fontWeight: FontWeight.w600,
                     color: enabled ? colors.ink : colors.muted,
                   ),
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(color: colors.muted, fontSize: 12)),
+                  Text(
+                    subtitle,
+                    style: AppTypography.footnote.copyWith(
+                      color: colors.muted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ],
             ),

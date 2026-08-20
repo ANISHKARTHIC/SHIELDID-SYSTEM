@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/branded_loading.dart';
 
 class NotificationsView extends StatefulWidget {
   const NotificationsView({super.key});
@@ -13,23 +16,52 @@ class NotificationsView extends StatefulWidget {
 
 class _NotificationsViewState extends State<NotificationsView> {
   bool _isLoading = true;
+  bool _isFirstLoad = true;
   List<dynamic> _notifications = [];
   String? _error;
+  Timer? _pollTimer;
+  int? _lastAlertCount;
 
   @override
   void initState() {
     super.initState();
     _fetchNotifications();
+    // An in-venue ban alert needs to reach on-floor staff within seconds,
+    // not only when they happen to reopen this tab — matches the admin
+    // console's existing 3s polling interval.
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _fetchNotifications(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchNotifications() async {
     try {
       final remoteData = RemoteDataSource();
       final notifications = await remoteData.getNotifications();
+      final alertCount = notifications
+          .where((n) => n['type'] == 'ALERT')
+          .length;
+      // A new ALERT arriving mid-poll (not the first load) is exactly the
+      // moment door staff need a tactile nudge — an in-venue ban escort
+      // alert shouldn't rely on someone visually re-checking the tab.
+      if (!_isFirstLoad &&
+          _lastAlertCount != null &&
+          alertCount > _lastAlertCount!) {
+        HapticFeedback.heavyImpact();
+      }
+      _lastAlertCount = alertCount;
       if (mounted) {
         setState(() {
           _notifications = notifications;
           _isLoading = false;
+          _isFirstLoad = false;
           _error = null;
         });
       }
@@ -38,6 +70,7 @@ class _NotificationsViewState extends State<NotificationsView> {
         setState(() {
           _error = e.toString();
           _isLoading = false;
+          _isFirstLoad = false;
         });
       }
     }
@@ -63,7 +96,7 @@ class _NotificationsViewState extends State<NotificationsView> {
     Widget content;
     if (_isLoading) {
       content = _scrollableEmptyState(
-        const Center(child: CircularProgressIndicator()),
+        const BrandedLoadingIndicator(icon: Icons.notifications_none_rounded),
       );
     } else if (_error != null) {
       content = _scrollableEmptyState(
@@ -87,7 +120,8 @@ class _NotificationsViewState extends State<NotificationsView> {
       content = ListView.separated(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         itemCount: _notifications.length,
-        separatorBuilder: (context, index) => Divider(color: colors.line, height: 1),
+        separatorBuilder: (context, index) =>
+            Divider(color: colors.line, height: 1),
         itemBuilder: (context, index) {
           final notif = _notifications[index];
           final isAlert = notif['type'] == 'ALERT';
@@ -127,17 +161,21 @@ class _NotificationsViewState extends State<NotificationsView> {
                         (notif['message'] as String?)?.trim().isNotEmpty == true
                             ? notif['message']
                             : 'Alert',
-                        style: TextStyle(
+                        style: AppTypography.body.copyWith(
                           color: colors.ink,
-                          fontSize: 15,
                           height: 1.3,
-                          fontWeight: isUnread ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: isUnread
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         formattedDate,
-                        style: TextStyle(color: colors.muted, fontSize: 12, fontWeight: FontWeight.w500),
+                        style: AppTypography.footnote.copyWith(
+                          color: colors.muted,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
@@ -147,7 +185,10 @@ class _NotificationsViewState extends State<NotificationsView> {
                     width: 7,
                     height: 7,
                     margin: const EdgeInsets.only(top: 5),
-                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
               ],
             ),
@@ -163,15 +204,13 @@ class _NotificationsViewState extends State<NotificationsView> {
         IconButton(
           icon: const Icon(Icons.refresh_rounded),
           onPressed: () {
+            HapticFeedback.selectionClick();
             setState(() => _isLoading = true);
             _fetchNotifications();
           },
         ),
       ],
-      child: RefreshIndicator(
-        onRefresh: _fetchNotifications,
-        child: content,
-      ),
+      child: RefreshIndicator(onRefresh: _fetchNotifications, child: content),
     );
   }
 }

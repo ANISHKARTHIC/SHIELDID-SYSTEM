@@ -49,7 +49,8 @@ class _DecisionOutcome {
   });
 }
 
-class _DecisionViewState extends State<DecisionView> with SingleTickerProviderStateMixin {
+class _DecisionViewState extends State<DecisionView>
+    with SingleTickerProviderStateMixin {
   bool _isSubmitting = false;
   bool _decisionRecorded = false;
   late final AnimationController _revealController;
@@ -65,20 +66,29 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
   void initState() {
     super.initState();
 
-    final reduceMotion = WidgetsBinding.instance.platformDispatcher.accessibilityFeatures.disableAnimations;
+    final reduceMotion = WidgetsBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .disableAnimations;
 
     _revealController = AnimationController(
       vsync: this,
-      duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 950),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 950),
     );
 
-    _iconScale = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.6, end: 1.05), weight: 65),
-      TweenSequenceItem(tween: Tween(begin: 1.05, end: 1.0), weight: 35),
-    ]).animate(CurvedAnimation(
-      parent: _revealController,
-      curve: const Interval(0.0, 0.26, curve: Curves.easeOutBack),
-    ));
+    _iconScale =
+        TweenSequence<double>([
+          TweenSequenceItem(tween: Tween(begin: 0.6, end: 1.05), weight: 65),
+          TweenSequenceItem(tween: Tween(begin: 1.05, end: 1.0), weight: 35),
+        ]).animate(
+          CurvedAnimation(
+            parent: _revealController,
+            curve: const Interval(0.0, 0.26, curve: Curves.easeOutBack),
+          ),
+        );
     _iconOpacity = CurvedAnimation(
       parent: _revealController,
       curve: const Interval(0.0, 0.2, curve: Curves.easeOut),
@@ -136,7 +146,10 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
     super.dispose();
   }
 
-  Future<void> _confirmAndSubmit(String finalDecision, {bool isDestructiveOverride = false}) async {
+  Future<void> _confirmAndSubmit(
+    String finalDecision, {
+    bool isDestructiveOverride = false,
+  }) async {
     if (isDestructiveOverride) {
       HapticFeedback.selectionClick();
       final confirmed = await showAppConfirmDialog(
@@ -176,7 +189,10 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
       }
     } catch (e) {
       if (mounted) {
-        showAppErrorSnackBar(context, 'Could not record decision. Please try again.');
+        showAppErrorSnackBar(
+          context,
+          'Could not record decision. Please try again.',
+        );
         setState(() => _isSubmitting = false);
       }
     }
@@ -253,13 +269,24 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
               Container(
                 width: 72,
                 height: 72,
-                decoration: BoxDecoration(color: colors.successSoft, shape: BoxShape.circle),
-                child: Icon(Icons.check_rounded, color: colors.success, size: 40),
+                decoration: BoxDecoration(
+                  color: colors.successSoft,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.check_rounded,
+                  color: colors.success,
+                  size: 40,
+                ),
               ),
               const SizedBox(height: 16),
               Text(
                 'Decision recorded',
-                style: TextStyle(color: colors.ink, fontSize: 18, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: colors.ink,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -280,11 +307,17 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: Colors.white,
+                      ),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                   ],
@@ -310,7 +343,11 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
                                   color: Colors.white.withValues(alpha: 0.18),
                                   shape: BoxShape.circle,
                                 ),
-                                child: Icon(outcome.icon, size: 54, color: Colors.white),
+                                child: Icon(
+                                  outcome.icon,
+                                  size: 54,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -352,26 +389,54 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
                               offset: Offset(0, (1 - _detailsSlide.value) * 12),
                               child: Container(
                                 width: double.infinity,
-                                padding: const EdgeInsets.symmetric(horizontal: 18),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                ),
                                 decoration: BoxDecoration(
                                   color: outcome.panelBg,
                                   borderRadius: BorderRadius.circular(18),
                                 ),
                                 child: Column(
                                   children: [
-                                    _buildDetailRow('Age', _calculateAge(widget.ocrData['ocr_dob'])),
-                                    Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
+                                    _buildDetailRow(
+                                      'Age',
+                                      _calculateAge(widget.ocrData['ocr_dob']),
+                                    ),
+                                    Divider(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                      height: 1,
+                                    ),
                                     if (widget.riskScore != null) ...[
-                                      _buildDetailRow('Risk Score', '${(widget.riskScore! * 100).clamp(0, 100).toInt()}%'),
-                                      Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
+                                      _buildDetailRow(
+                                        'Risk Score',
+                                        '${(widget.riskScore! * 100).clamp(0, 100).toInt()}%',
+                                      ),
+                                      Divider(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        height: 1,
+                                      ),
                                     ],
                                     _buildDetailRow(
                                       'Venue Status',
-                                      widget.isBlacklisted ? 'Restricted' : 'Clear',
+                                      widget.isBlacklisted
+                                          ? 'Restricted'
+                                          : 'Clear',
                                     ),
                                     if (widget.incidentCount > 0) ...[
-                                      Divider(color: Colors.white.withValues(alpha: 0.16), height: 1),
-                                      _buildDetailRow('Prior Incidents', widget.incidentCount.toString()),
+                                      Divider(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        height: 1,
+                                      ),
+                                      _buildDetailRow(
+                                        'Prior Incidents',
+                                        widget.incidentCount.toString(),
+                                      ),
                                     ],
                                   ],
                                 ),
@@ -407,20 +472,34 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
         width: double.infinity,
         height: 58,
         child: OutlinedButton(
-          onPressed: enabled ? () => _confirmAndSubmit('BLOCK', isDestructiveOverride: true) : null,
+          onPressed: enabled
+              ? () => _confirmAndSubmit('BLOCK', isDestructiveOverride: true)
+              : null,
           style: OutlinedButton.styleFrom(
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.45), width: 1.4),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.45),
+              width: 1.4,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
           ),
           child: _isSubmitting
               ? const SizedBox(
                   height: 22,
                   width: 22,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.4),
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.4,
+                  ),
                 )
               : const Text(
                   'Dismiss Restricted Entry',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
         ),
       );
@@ -434,18 +513,30 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
             child: OutlinedButton(
               onPressed: enabled ? () => _confirmAndSubmit('BLOCK') : null,
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.4), width: 1.4),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                side: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.4),
+                  width: 1.4,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               child: _isSubmitting
                   ? const SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : Text(
                       widget.decision == 'CHECK' ? 'Deny' : 'Restrict',
-                      style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 15),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        fontSize: 15,
+                      ),
                     ),
             ),
           ),
@@ -459,17 +550,25 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: outcome.bottom,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               child: _isSubmitting
                   ? SizedBox(
                       height: 22,
                       width: 22,
-                      child: CircularProgressIndicator(color: outcome.bottom, strokeWidth: 2.4),
+                      child: CircularProgressIndicator(
+                        color: outcome.bottom,
+                        strokeWidth: 2.4,
+                      ),
                     )
                   : Text(
                       widget.decision == 'CHECK' ? 'Approve' : 'Allow',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
                     ),
             ),
           ),
@@ -486,12 +585,20 @@ class _DecisionViewState extends State<DecisionView> with SingleTickerProviderSt
           padding: const EdgeInsets.symmetric(vertical: 14),
           child: Text(
             label,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.75),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         Text(
           value,
-          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ],
     );

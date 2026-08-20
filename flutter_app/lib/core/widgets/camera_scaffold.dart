@@ -66,10 +66,46 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
   @override
   Widget build(BuildContext context) {
     if (widget.isInitializing || widget.controller == null) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.camera_alt_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(height: 20),
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Starting camera…',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -140,7 +176,11 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                     children: [
                       if (!widget.isProcessing)
                         IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 28,
+                          ),
                           onPressed: widget.onClose,
                         )
                       else
@@ -158,7 +198,10 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                   const SizedBox(height: 20),
                   Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(100),
@@ -169,7 +212,10 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                           Container(
                             width: 6,
                             height: 6,
-                            decoration: const BoxDecoration(color: Color(0xFF4ADE80), shape: BoxShape.circle),
+                            decoration: BoxDecoration(
+                              color: context.colors.success,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                           const SizedBox(width: 8),
                           Text(
@@ -193,11 +239,17 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: context.colors.danger.withValues(alpha: 0.6)),
+                        border: Border.all(
+                          color: context.colors.danger.withValues(alpha: 0.6),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline_rounded, color: context.colors.danger, size: 20),
+                          Icon(
+                            Icons.error_outline_rounded,
+                            color: context.colors.danger,
+                            size: 20,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -242,7 +294,10 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                         ),
                       ),
                       IconButton(
-                        onPressed: widget.onPickFromGallery,
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          widget.onPickFromGallery();
+                        },
                         icon: const Icon(
                           Icons.photo_library,
                           color: Colors.white,
@@ -275,7 +330,10 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                         onPressed: widget.onCancelProcessing,
                         child: const Text(
                           'Cancel',
-                          style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
@@ -307,7 +365,8 @@ class _PulsingText extends StatefulWidget {
   State<_PulsingText> createState() => _PulsingTextState();
 }
 
-class _PulsingTextState extends State<_PulsingText> with SingleTickerProviderStateMixin {
+class _PulsingTextState extends State<_PulsingText>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _opacity;
 
@@ -318,8 +377,10 @@ class _PulsingTextState extends State<_PulsingText> with SingleTickerProviderSta
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _opacity = Tween<double>(begin: 1.0, end: 0.6)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _opacity = Tween<double>(
+      begin: 1.0,
+      end: 0.6,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -335,7 +396,11 @@ class _PulsingTextState extends State<_PulsingText> with SingleTickerProviderSta
       child: Text(
         widget.text,
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

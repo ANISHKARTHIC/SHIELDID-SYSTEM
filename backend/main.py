@@ -18,6 +18,8 @@ from backend.api.v1_router import router as v1_router
 from backend.api.auth_router import router as auth_router
 from backend.api.users_router import router as users_router
 from backend.api.venue_router import router as venue_router
+from backend.api.occupancy_router import router as occupancy_router
+from backend.api.blacklist_router import router as blacklist_router
 from backend.api.replay_router import router as replay_router
 from backend.api.supervisor_router import router as supervisor_router
 from backend.api.analytics_router import router as analytics_router
@@ -76,10 +78,12 @@ except Exception as e:
 
 from contextlib import asynccontextmanager
 from backend.services.retention_cron import start_retention_cron
+from backend.services.occupancy_cron import start_occupancy_cron
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_retention_cron()
+    start_occupancy_cron()
     yield
 
 app = FastAPI(
@@ -101,6 +105,8 @@ app.include_router(v1_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(venue_router)
+app.include_router(occupancy_router)
+app.include_router(blacklist_router)
 app.include_router(replay_router)
 app.include_router(supervisor_router)
 app.include_router(analytics_router)

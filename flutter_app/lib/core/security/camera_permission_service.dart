@@ -10,10 +10,16 @@ class CameraPermissionService {
   static Future<CameraPermissionResult> ensureGranted() async {
     var status = await Permission.camera.status;
     if (status.isGranted) {
-      return const CameraPermissionResult(granted: true, permanentlyDenied: false);
+      return const CameraPermissionResult(
+        granted: true,
+        permanentlyDenied: false,
+      );
     }
     if (status.isPermanentlyDenied) {
-      return const CameraPermissionResult(granted: false, permanentlyDenied: true);
+      return const CameraPermissionResult(
+        granted: false,
+        permanentlyDenied: true,
+      );
     }
 
     status = await Permission.camera.request();
@@ -29,5 +35,8 @@ class CameraPermissionService {
 class CameraPermissionResult {
   final bool granted;
   final bool permanentlyDenied;
-  const CameraPermissionResult({required this.granted, required this.permanentlyDenied});
+  const CameraPermissionResult({
+    required this.granted,
+    required this.permanentlyDenied,
+  });
 }

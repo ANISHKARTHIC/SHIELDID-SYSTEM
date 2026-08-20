@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'camera_view.dart';
+import 'occupancy_view.dart';
 import 'package:dio/dio.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -24,6 +26,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
   String? _errorMessage;
   Map<String, dynamic>? _stats;
   Map<String, dynamic>? _readiness;
+  Map<String, dynamic>? _occupancy;
 
   @override
   void initState() {
@@ -31,6 +34,17 @@ class _HomeViewState extends ConsumerState<HomeView> {
     if (widget.loadInitialData) {
       _fetchStats();
       _fetchReadiness();
+      _fetchOccupancy();
+    }
+  }
+
+  Future<void> _fetchOccupancy() async {
+    try {
+      final remoteData = RemoteDataSource();
+      final occupancy = await remoteData.getOccupancyCount();
+      if (mounted) setState(() => _occupancy = occupancy);
+    } catch (e) {
+      if (mounted) setState(() => _occupancy = null);
     }
   }
 
@@ -60,7 +74,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
             final colors = context.colors;
             return AlertDialog(
               backgroundColor: colors.surface,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               title: Row(
                 children: [
                   Icon(Icons.dns_rounded, color: colors.primary),
@@ -122,7 +138,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
                       Text(
                         testResult!,
                         style: TextStyle(
-                          color: testSuccess == true ? colors.success : colors.danger,
+                          color: testSuccess == true
+                              ? colors.success
+                              : colors.danger,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -144,7 +162,10 @@ class _HomeViewState extends ConsumerState<HomeView> {
                       if (!dialogContext.mounted) return;
                       Navigator.pop(dialogContext);
                       if (mounted) {
-                        showAppSuccessSnackBar(this.context, 'Server address updated');
+                        showAppSuccessSnackBar(
+                          this.context,
+                          'Server address updated',
+                        );
                         _fetchStats();
                       }
                     }
@@ -193,11 +214,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
       final sessionId = await remoteData.startSession();
 
       if (mounted) {
-        Navigator.of(context)
-            .push(AppPageRoute.push(CameraView(sessionId: sessionId)))
-            .then((_) {
+        Navigator.of(
+          context,
+        ).push(AppPageRoute.push(CameraView(sessionId: sessionId))).then((_) {
           _fetchStats(); // Refresh stats when returning
           _fetchReadiness();
+          _fetchOccupancy();
         });
       }
     } on DioException catch (e) {
@@ -221,7 +243,10 @@ class _HomeViewState extends ConsumerState<HomeView> {
       }
     } catch (e) {
       if (mounted) {
-        showAppErrorSnackBar(context, 'Something went wrong. Please try again.');
+        showAppErrorSnackBar(
+          context,
+          'Something went wrong. Please try again.',
+        );
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -333,13 +358,32 @@ class _HomeViewState extends ConsumerState<HomeView> {
             ),
           ),
           const SizedBox(height: 16),
+          _buildOccupancyCard(colors),
+          const SizedBox(height: 16),
           AppSurface(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
             child: Row(
               children: [
-                _buildStatColumn(colors, 'Verified', _stats != null ? _stats!["verified"].toString() : '-', colors.ink, isFirst: true),
-                _buildStatColumn(colors, 'Pending', _stats != null ? _stats!["pending"].toString() : '-', colors.ink),
-                _buildStatColumn(colors, 'Flagged', _stats != null ? _stats!["flagged"].toString() : '-', colors.warning, isLast: true),
+                _buildStatColumn(
+                  colors,
+                  'Verified',
+                  _stats != null ? _stats!["verified"].toString() : '-',
+                  colors.ink,
+                  isFirst: true,
+                ),
+                _buildStatColumn(
+                  colors,
+                  'Pending',
+                  _stats != null ? _stats!["pending"].toString() : '-',
+                  colors.ink,
+                ),
+                _buildStatColumn(
+                  colors,
+                  'Flagged',
+                  _stats != null ? _stats!["flagged"].toString() : '-',
+                  colors.warning,
+                  isLast: true,
+                ),
               ],
             ),
           ),
@@ -360,8 +404,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
                   colors,
                   Icons.memory_rounded,
                   'AI Service',
-                  _readiness?['checks']?['ai_service'] == 'ok' ? 'Ready' : 'Unavailable',
-                  _readiness?['checks']?['ai_service'] == 'ok' ? colors.success : colors.muted,
+                  _readiness?['checks']?['ai_service'] == 'ok'
+                      ? 'Ready'
+                      : 'Unavailable',
+                  _readiness?['checks']?['ai_service'] == 'ok'
+                      ? colors.success
+                      : colors.muted,
                 ),
                 Divider(color: colors.line, height: 1),
                 _buildStatusRow(
@@ -389,9 +437,15 @@ class _HomeViewState extends ConsumerState<HomeView> {
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.document_scanner_rounded, color: colors.onPrimary),
+                      Icon(
+                        Icons.document_scanner_rounded,
+                        color: colors.onPrimary,
+                      ),
                       const SizedBox(width: 10),
-                      Text('Start Verification', style: TextStyle(color: colors.onPrimary)),
+                      Text(
+                        'Start Verification',
+                        style: TextStyle(color: colors.onPrimary),
+                      ),
                     ],
                   ),
           ),
@@ -416,11 +470,109 @@ class _HomeViewState extends ConsumerState<HomeView> {
             children: [
               Icon(icon, size: 15, color: colors.muted),
               const SizedBox(width: 8),
-              Text(label, style: TextStyle(color: colors.muted, fontSize: 13, fontWeight: FontWeight.w500)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: colors.muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
-          Text(value, style: TextStyle(color: valueColor, fontSize: 13, fontWeight: FontWeight.w700)),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildOccupancyCard(AppColorsExt colors) {
+    final currentCount = _occupancy?['current_count'];
+    final maxCapacity = _occupancy?['max_capacity'];
+    final atCapacity = _occupancy?['at_capacity'] == true;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          Navigator.of(context).push(AppPageRoute.push(const OccupancyView()));
+        },
+        child: AppSurface(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: (atCapacity ? colors.danger : colors.primary)
+                      .withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.groups_rounded,
+                  color: atCapacity ? colors.danger : colors.primary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Currently Inside',
+                      style: TextStyle(
+                        color: colors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      currentCount != null
+                          ? (maxCapacity != null
+                                ? '$currentCount / $maxCapacity'
+                                : '$currentCount')
+                          : '—',
+                      style: TextStyle(
+                        color: atCapacity ? colors.danger : colors.ink,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (atCapacity)
+                Text(
+                  'AT CAPACITY',
+                  style: TextStyle(
+                    color: colors.danger,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: colors.muted,
+                  size: 20,
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

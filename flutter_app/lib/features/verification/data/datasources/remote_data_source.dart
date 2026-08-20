@@ -89,10 +89,7 @@ class RemoteDataSource {
     String decision,
     String notes,
   ) async {
-    final payload = {
-      'staff_decision': decision.toLowerCase(),
-      'notes': notes,
-    };
+    final payload = {'staff_decision': decision.toLowerCase(), 'notes': notes};
 
     final response = await _dio.post(
       '/session/$sessionId/finalize',
@@ -109,5 +106,27 @@ class RemoteDataSource {
   Future<List<dynamic>> getNotifications() async {
     final response = await _dio.get('/notifications');
     return response.data as List<dynamic>;
+  }
+
+  Future<List<dynamic>> getCurrentOccupants() async {
+    final response = await _dio.get('/occupancy/current');
+    return response.data as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getOccupancyCount() async {
+    final response = await _dio.get('/occupancy/count');
+    return response.data as Map<String, dynamic>;
+  }
+
+  Future<void> checkOutOccupant(int occupancyId) async {
+    await _dio.post('/occupancy/$occupancyId/checkout');
+  }
+
+  Future<Map<String, dynamic>> createBan(int customerId, String reason) async {
+    final response = await _dio.post(
+      '/blacklist',
+      data: {'customer_id': customerId, 'reason': reason},
+    );
+    return response.data as Map<String, dynamic>;
   }
 }

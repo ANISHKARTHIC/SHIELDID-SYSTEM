@@ -121,8 +121,16 @@ class _GuideFramePainter extends CustomPainter {
       }
 
       bracket(Offset(inset, inset), const Offset(1, 0), const Offset(0, 1));
-      bracket(Offset(size.width - inset, inset), const Offset(-1, 0), const Offset(0, 1));
-      bracket(Offset(inset, size.height - inset), const Offset(1, 0), const Offset(0, -1));
+      bracket(
+        Offset(size.width - inset, inset),
+        const Offset(-1, 0),
+        const Offset(0, 1),
+      );
+      bracket(
+        Offset(inset, size.height - inset),
+        const Offset(1, 0),
+        const Offset(0, -1),
+      );
       bracket(
         Offset(size.width - inset, size.height - inset),
         const Offset(-1, 0),

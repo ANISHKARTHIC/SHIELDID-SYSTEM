@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/empty_state.dart';
+import '../../../../core/widgets/branded_loading.dart';
 
 class HistoryView extends StatefulWidget {
   const HistoryView({super.key});
@@ -49,7 +51,7 @@ class _HistoryViewState extends State<HistoryView> {
     Widget content;
     if (_isLoading) {
       content = _scrollableEmptyState(
-        const Center(child: CircularProgressIndicator()),
+        const BrandedLoadingIndicator(icon: Icons.history_rounded),
       );
     } else if (_error != null) {
       content = _scrollableEmptyState(
@@ -73,7 +75,8 @@ class _HistoryViewState extends State<HistoryView> {
       content = ListView.separated(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         itemCount: _history.length,
-        separatorBuilder: (context, index) => Divider(color: colors.line, height: 1),
+        separatorBuilder: (context, index) =>
+            Divider(color: colors.line, height: 1),
         itemBuilder: (context, index) {
           final item = _history[index];
           final decision = (item['final_decision'] ?? 'pending').toString();
@@ -84,46 +87,57 @@ class _HistoryViewState extends State<HistoryView> {
               DateTime.tryParse(item['created_at'] ?? '') ?? DateTime.now();
           String formattedDate = DateFormat('MMM d, HH:mm').format(date);
 
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
+          return TweenAnimationBuilder<double>(
+            key: ValueKey(item['session_id']),
+            tween: Tween(begin: 0, end: 1),
+            duration: Duration(milliseconds: 260 + (index.clamp(0, 8) * 30)),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, child) => Opacity(
+              opacity: value,
+              child: Transform.translate(
+                offset: Offset(0, (1 - value) * 6),
+                child: child,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(statusIcon, color: statusColor, size: 18),
                   ),
-                  child: Icon(statusIcon, color: statusColor, size: 18),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        formattedDate,
-                        style: TextStyle(
-                          color: colors.ink,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          formattedDate,
+                          style: AppTypography.body.copyWith(
+                            color: colors.ink,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Session ${item['session_id'].toString().substring(0, 8)}',
-                        style: TextStyle(
-                          color: colors.muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
+                        const SizedBox(height: 2),
+                        Text(
+                          'Session ${item['session_id'].toString().substring(0, 8)}',
+                          style: AppTypography.footnote.copyWith(
+                            color: colors.muted,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                StatusPill(label: decision.toUpperCase(), color: statusColor),
-              ],
+                  StatusPill(label: decision.toUpperCase(), color: statusColor),
+                ],
+              ),
             ),
           );
         },
@@ -137,15 +151,13 @@ class _HistoryViewState extends State<HistoryView> {
         IconButton(
           icon: const Icon(Icons.refresh_rounded),
           onPressed: () {
+            HapticFeedback.selectionClick();
             setState(() => _isLoading = true);
             _fetchHistory();
           },
         ),
       ],
-      child: RefreshIndicator(
-        onRefresh: _fetchHistory,
-        child: content,
-      ),
+      child: RefreshIndicator(onRefresh: _fetchHistory, child: content),
     );
   }
 

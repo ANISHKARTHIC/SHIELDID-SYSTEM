@@ -48,7 +48,9 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
 
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
-      if (mounted) setState(() => _error = 'No camera is available on this device.');
+      if (mounted) {
+        setState(() => _error = 'No camera is available on this device.');
+      }
       return;
     }
 
@@ -71,7 +73,11 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       await _controller!.initialize();
       if (mounted) setState(() => _isCameraInitialized = true);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not start the camera. Please try again.');
+      if (mounted) {
+        setState(
+          () => _error = 'Could not start the camera. Please try again.',
+        );
+      }
     }
   }
 
@@ -147,7 +153,9 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       final image = await _controller!.takePicture();
       await _processFaceImage(image.path);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not capture photo. Please try again.');
+      if (mounted) {
+        setState(() => _error = 'Could not capture photo. Please try again.');
+      }
     }
   }
 

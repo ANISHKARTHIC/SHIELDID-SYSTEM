@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/verification/presentation/views/home_view.dart';
 import 'features/verification/presentation/views/history_view.dart';
+import 'features/verification/presentation/views/occupancy_view.dart';
 import 'features/verification/presentation/views/notifications_view.dart';
 import 'features/verification/presentation/views/login_view.dart';
 import 'features/verification/presentation/views/profile_view.dart';
@@ -11,6 +12,7 @@ import 'core/security/biometric_auth_service.dart';
 import 'core/security/biometric_prefs.dart';
 import 'core/providers/theme_mode_provider.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/branded_loading.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -167,46 +169,9 @@ class _BrandedLoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.colors;
     return Scaffold(
-      backgroundColor: colors.canvas,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: colors.primarySoft,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(
-                Icons.verified_user_rounded,
-                color: colors.primary,
-                size: 32,
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.4,
-                color: colors.primary,
-              ),
-            ),
-            if (message != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                message!,
-                style: TextStyle(color: colors.muted, fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ],
-        ),
-      ),
+      backgroundColor: context.colors.canvas,
+      body: BrandedLoadingIndicator(message: message),
     );
   }
 }
@@ -231,6 +196,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   late final List<Widget> _screens = [
     HomeView(loadInitialData: widget.loadInitialData),
     const HistoryView(),
+    const OccupancyView(),
     const NotificationsView(),
     ProfileView(onLoggedOut: widget.onLoggedOut),
   ];
@@ -262,6 +228,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             NavigationDestination(
               icon: Icon(Icons.history_rounded),
               label: 'History',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.groups_outlined),
+              selectedIcon: Icon(Icons.groups_rounded),
+              label: 'Occupancy',
             ),
             NavigationDestination(
               icon: Icon(Icons.notifications_none_rounded),

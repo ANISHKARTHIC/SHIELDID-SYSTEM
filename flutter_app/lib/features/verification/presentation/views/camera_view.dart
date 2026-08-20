@@ -40,7 +40,9 @@ class _CameraViewState extends State<CameraView> {
 
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
-      if (mounted) setState(() => _error = 'No camera is available on this device.');
+      if (mounted) {
+        setState(() => _error = 'No camera is available on this device.');
+      }
       return;
     }
 
@@ -58,7 +60,11 @@ class _CameraViewState extends State<CameraView> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not start the camera. Please try again.');
+      if (mounted) {
+        setState(
+          () => _error = 'Could not start the camera. Please try again.',
+        );
+      }
     }
   }
 
@@ -75,7 +81,9 @@ class _CameraViewState extends State<CameraView> {
       final image = await _controller!.takePicture();
       _navigateToReview(image.path);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not capture photo. Please try again.');
+      if (mounted) {
+        setState(() => _error = 'Could not capture photo. Please try again.');
+      }
     }
   }
 

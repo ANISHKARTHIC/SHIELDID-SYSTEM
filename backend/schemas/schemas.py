@@ -37,8 +37,35 @@ class CustomerResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class VenueCreateRequest(BaseModel):
+    name: str
+    address: str
+    max_capacity: Optional[int] = None
+
+class VenueUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    max_capacity: Optional[int] = None
+
+class VenueResponse(BaseModel):
+    id: int
+    name: str
+    address: str
+    is_active: bool
+    max_capacity: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class BlacklistCreate(BaseModel):
     customer_name: str
+    reason: str
+    manager_notes: Optional[str] = None
+    expiry_date: Optional[str] = None # format YYYY-MM-DD
+
+class BlacklistCreateByCustomerId(BaseModel):
+    customer_id: int
     reason: str
     manager_notes: Optional[str] = None
     expiry_date: Optional[str] = None # format YYYY-MM-DD

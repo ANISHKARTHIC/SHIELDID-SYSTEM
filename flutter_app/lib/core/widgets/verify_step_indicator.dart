@@ -38,7 +38,9 @@ class VerifyStepIndicator extends StatelessWidget {
 
             return Expanded(
               child: Padding(
-                padding: EdgeInsets.only(right: stepIndex == totalSteps ? 0 : 6),
+                padding: EdgeInsets.only(
+                  right: stepIndex == totalSteps ? 0 : 6,
+                ),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeOut,

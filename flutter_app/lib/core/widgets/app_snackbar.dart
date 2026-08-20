@@ -33,7 +33,11 @@ void showAppSuccessSnackBar(BuildContext context, String message) {
     SnackBar(
       content: Row(
         children: [
-          Icon(Icons.check_circle_outline_rounded, color: colors.success, size: 20),
+          Icon(
+            Icons.check_circle_outline_rounded,
+            color: colors.success,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

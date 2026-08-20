@@ -181,9 +181,50 @@ extension AppColorsX on BuildContext {
       Theme.of(this).extension<AppColorsExt>() ?? AppColorsExt.light;
 }
 
+/// Locked type scale, modeled on iOS's own system text styles (Large Title
+/// / Title / Headline / Body / Callout / Subhead / Footnote / Caption) —
+/// screens should pick a named style here rather than inventing a new
+/// fontSize/fontWeight pair, so the app converges on a fixed set of text
+/// "voices" instead of the ad hoc per-screen sizing that predates this.
+/// Color is deliberately NOT baked in — call `.copyWith(color: ...)` or
+/// wrap in a themed `DefaultTextStyle`, since the same style is reused
+/// across `colors.ink`/`colors.muted`/semantic colors.
+class AppTypography {
+  static const largeTitle = TextStyle(
+    fontSize: 28,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.01,
+  );
+  static const title = TextStyle(
+    fontSize: 22,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.01,
+  );
+  static const headline = TextStyle(
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.005,
+  );
+  static const body = TextStyle(fontSize: 15, fontWeight: FontWeight.w500);
+  static const bodyEmphasized = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w700,
+  );
+  static const callout = TextStyle(fontSize: 14, fontWeight: FontWeight.w500);
+  static const subhead = TextStyle(fontSize: 13, fontWeight: FontWeight.w500);
+  static const footnote = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+  static const caption = TextStyle(
+    fontSize: 11,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.02,
+  );
+}
+
 class AppTheme {
-  static ThemeData light() => _build(brightness: Brightness.light, colors: AppColorsExt.light);
-  static ThemeData dark() => _build(brightness: Brightness.dark, colors: AppColorsExt.dark);
+  static ThemeData light() =>
+      _build(brightness: Brightness.light, colors: AppColorsExt.light);
+  static ThemeData dark() =>
+      _build(brightness: Brightness.dark, colors: AppColorsExt.dark);
 
   static ThemeData _build({
     required Brightness brightness,
@@ -305,13 +346,21 @@ class AppTheme {
           ),
         ),
       ),
-      dividerTheme: DividerThemeData(color: colors.line, thickness: 1, space: 1),
+      dividerTheme: DividerThemeData(
+        color: colors.line,
+        thickness: 1,
+        space: 1,
+      ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? colors.onPrimary : colors.muted,
+          (states) => states.contains(WidgetState.selected)
+              ? colors.onPrimary
+              : colors.muted,
         ),
         trackColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? colors.primary : colors.line,
+          (states) => states.contains(WidgetState.selected)
+              ? colors.primary
+              : colors.line,
         ),
         trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
       ),
@@ -345,22 +394,13 @@ class AppPage extends StatelessWidget {
           children: [
             Text(
               title,
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w600,
-                letterSpacing: -0.01,
-                color: colors.ink,
-              ),
+              style: AppTypography.largeTitle.copyWith(color: colors.ink),
             ),
             if (subtitle != null) ...[
               const SizedBox(height: 3),
               Text(
                 subtitle!,
-                style: TextStyle(
-                  color: colors.muted,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: AppTypography.subhead.copyWith(color: colors.muted),
               ),
             ],
           ],
@@ -431,15 +471,7 @@ class StatusPill extends StatelessWidget {
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.02,
-            ),
-          ),
+          Text(label, style: AppTypography.caption.copyWith(color: color)),
         ],
       ),
     );

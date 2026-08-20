@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../core/security/token_storage.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../data/datasources/remote_data_source.dart';
@@ -13,7 +14,8 @@ class LoginView extends StatefulWidget {
   State<LoginView> createState() => _LoginViewState();
 }
 
-class _LoginViewState extends State<LoginView> {
+class _LoginViewState extends State<LoginView>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -23,8 +25,47 @@ class _LoginViewState extends State<LoginView> {
   String? _errorMessage;
   bool _obscurePassword = true;
 
+  late final AnimationController _entranceController;
+  late final Animation<double> _entranceOpacity;
+  late final Animation<Offset> _entranceOffset;
+
+  bool _entranceStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    _entranceOpacity = CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOutCubic,
+    );
+    _entranceOffset =
+        Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_entranceStarted) return;
+    _entranceStarted = true;
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+      _entranceController.value = 1;
+    } else {
+      _entranceController.forward();
+    }
+  }
+
   @override
   void dispose() {
+    _entranceController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -61,8 +102,10 @@ class _LoginViewState extends State<LoginView> {
           _errorMessage = 'Sign in failed. Please try again.';
         }
       });
+      HapticFeedback.mediumImpact();
     } catch (e) {
       setState(() => _errorMessage = 'Something went wrong. Please try again.');
+      HapticFeedback.mediumImpact();
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -84,33 +127,40 @@ class _LoginViewState extends State<LoginView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Container(
-                      width: 72,
-                      height: 72,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: colors.primarySoft,
-                        borderRadius: BorderRadius.circular(20),
+                    FadeTransition(
+                      opacity: _entranceOpacity,
+                      child: SlideTransition(
+                        position: _entranceOffset,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Image.asset(
+                                'assets/branding/app_icon_1024.png',
+                                width: 72,
+                                height: 72,
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'VenuePass',
+                              style: AppTypography.largeTitle.copyWith(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w800,
+                                color: colors.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Sign in with your operator account to start verifying customers.',
+                              style: AppTypography.callout.copyWith(
+                                color: colors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      child: Icon(
-                        Icons.verified_user_rounded,
-                        color: colors.primary,
-                        size: 36,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'VenuePass',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: colors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Sign in with your operator account to start verifying customers.',
-                      style: TextStyle(color: colors.muted, fontSize: 14),
                     ),
                     const SizedBox(height: 32),
                     if (_errorMessage != null) ...[
@@ -131,7 +181,7 @@ class _LoginViewState extends State<LoginView> {
                             Expanded(
                               child: Text(
                                 _errorMessage!,
-                                style: TextStyle(
+                                style: AppTypography.callout.copyWith(
                                   color: colors.danger,
                                   fontWeight: FontWeight.w600,
                                 ),

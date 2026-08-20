@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Float, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Float, Text, JSON, Index
 from sqlalchemy.orm import relationship
 import enum
 from datetime import datetime, timezone
@@ -28,6 +28,8 @@ class Venue(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     address = Column(String)
+    is_active = Column(Boolean, default=True, nullable=False)
+    max_capacity = Column(Integer, nullable=True)  # None = uncapped
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     users = relationship("User", back_populates="venue")
@@ -45,6 +47,7 @@ class VenueConfiguration(Base):
     retention_days_incident = Column(Integer, default=365)
     verification_mode = Column(String, default="manual") # manual, ai_assisted
     theme_config = Column(JSON, nullable=True)
+    occupancy_auto_expire_hours = Column(Integer, default=6)
     
     venue = relationship("Venue", back_populates="configuration")
 
@@ -157,6 +160,35 @@ class VerificationSession(Base):
     customer = relationship("Customer", back_populates="sessions")
     operator = relationship("User", back_populates="sessions")
     notes = relationship("SupervisorNote", back_populates="session", cascade="all, delete")
+
+class OccupancyStatusEnum(str, enum.Enum):
+    INSIDE = "INSIDE"
+    CHECKED_OUT = "CHECKED_OUT"     # manual checkout by staff
+    AUTO_EXPIRED = "AUTO_EXPIRED"   # auto-expire job closed it
+
+class Occupancy(Base):
+    """
+    Tracks who is currently inside a venue. Deliberately a separate table
+    from VerificationSession, which becomes immutable (is_locked=True) once
+    it reaches a terminal state — occupancy needs to keep changing (checkout,
+    auto-expire) long after the entry session is locked.
+    """
+    __tablename__ = "occupancy_records"
+    id = Column(Integer, primary_key=True, index=True)
+    venue_id = Column(Integer, ForeignKey("venues.id"), index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
+    session_id = Column(String, ForeignKey("verification_sessions.id"), nullable=True)
+    entered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    exited_at = Column(DateTime, nullable=True)  # NULL = currently inside
+    status = Column(Enum(OccupancyStatusEnum), default=OccupancyStatusEnum.INSIDE)
+    checked_out_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    venue = relationship("Venue")
+    customer = relationship("Customer")
+    session = relationship("VerificationSession")
+    checked_out_by = relationship("User")
+
+Index('ix_occupancy_venue_open', Occupancy.venue_id, Occupancy.exited_at)
 
 class SupervisorNote(Base):
     __tablename__ = "supervisor_notes"

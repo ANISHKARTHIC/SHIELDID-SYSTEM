@@ -1,13 +1,73 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from backend.api.deps import get_db, get_current_active_user, RoleChecker
-from backend.models.models import RoleEnum
+from backend.models.models import RoleEnum, User
 from backend.services.venue_service import venue_service
+from backend.services.venue_admin_service import venue_admin_service
+from backend.schemas.schemas import VenueCreateRequest, VenueUpdateRequest, VenueResponse
 
 router = APIRouter(prefix="/api/v1/venues", tags=["venues"], dependencies=[Depends(get_current_active_user)])
 require_admin = RoleChecker([RoleEnum.super_admin, RoleEnum.venue_admin])
+require_super_admin_venues = RoleChecker([RoleEnum.super_admin])
+
+
+@router.post("", response_model=VenueResponse, dependencies=[Depends(require_super_admin_venues)])
+def create_venue(req: VenueCreateRequest, db: Session = Depends(get_db)):
+    return venue_admin_service.create_venue(db, req.name, req.address, req.max_capacity)
+
+
+@router.get("", response_model=list[VenueResponse])
+def list_venues(
+    include_inactive: bool = False,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role == RoleEnum.super_admin:
+        return venue_admin_service.list_venues(db, include_inactive=include_inactive)
+    venue = venue_admin_service.get_venue(db, current_user.venue_id)
+    return [venue] if venue else []
+
+
+@router.get("/{venue_id}", response_model=VenueResponse)
+def get_venue(
+    venue_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != RoleEnum.super_admin and venue_id != current_user.venue_id:
+        raise HTTPException(status_code=403, detail="Cannot access another venue")
+    venue = venue_admin_service.get_venue(db, venue_id)
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found")
+    return venue
+
+
+@router.put("/{venue_id}", response_model=VenueResponse, dependencies=[Depends(require_admin)])
+def update_venue(
+    venue_id: int,
+    req: VenueUpdateRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != RoleEnum.super_admin and venue_id != current_user.venue_id:
+        raise HTTPException(status_code=403, detail="Cannot modify another venue")
+    venue = venue_admin_service.update_venue(db, venue_id, req.model_dump(exclude_unset=True))
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found")
+    return venue
+
+
+@router.delete("/{venue_id}", response_model=VenueResponse, dependencies=[Depends(require_super_admin_venues)])
+def deactivate_venue(venue_id: int, db: Session = Depends(get_db)):
+    """Deactivates (soft-deletes) a venue. Never hard-deletes — many other
+    tables reference venues.id by foreign key."""
+    venue = venue_admin_service.deactivate_venue(db, venue_id)
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found")
+    return venue
+
 
 @router.get("/{venue_id}/config")
 def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
@@ -20,7 +80,8 @@ def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
         "retention_days_manual": config.retention_days_manual,
         "retention_days_incident": config.retention_days_incident,
         "verification_mode": config.verification_mode,
-        "theme_config": config.theme_config
+        "theme_config": config.theme_config,
+        "occupancy_auto_expire_hours": config.occupancy_auto_expire_hours,
     }
 
 @router.put("/{venue_id}/config", dependencies=[Depends(require_admin)])

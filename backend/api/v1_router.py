@@ -8,7 +8,7 @@ import uuid
 from backend.api.deps import get_db, get_current_active_user
 from backend.db.redis import get_redis
 from backend.services.session_service import session_service
-from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote, User, AuditLog
+from backend.models.models import Customer, Document, VerificationSession, Blacklist, Incident, Membership, SessionStateEnum, DecisionEnum, Notification, SessionAuditLog, SupervisorNote, User, AuditLog, Occupancy
 from backend.schemas.schemas import BlacklistCreate, IncidentCreate, VerificationDecision
 from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
@@ -404,7 +404,18 @@ async def finalize_session(
         session_service.transition_state(db, session_id, final_state)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
+
+    if final_state == SessionStateEnum.APPROVED:
+        # Person is now inside the venue — separate table from
+        # VerificationSession since occupancy needs to keep changing
+        # (checkout, auto-expire) after the session itself is locked.
+        db.add(Occupancy(
+            venue_id=current_user.venue_id,
+            customer_id=customer.id,
+            session_id=session_id,
+        ))
+        db.commit()
+
     redis_client.delete(f"session:{session_id}")
     
     # Trigger Notification for DENY or CHECK

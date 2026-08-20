@@ -58,7 +58,10 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     super.initState();
     _loadingTimer = Timer.periodic(const Duration(milliseconds: 1400), (_) {
       if (mounted) {
-        setState(() => _loadingMessageIndex = (_loadingMessageIndex + 1) % _loadingMessages.length);
+        setState(
+          () => _loadingMessageIndex =
+              (_loadingMessageIndex + 1) % _loadingMessages.length,
+        );
       }
     });
     _processDocument();
@@ -177,7 +180,11 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                   const SizedBox(height: 18),
                   _buildEditableField(colors, 'Surname', _surnameController),
                   const SizedBox(height: 16),
-                  _buildEditableField(colors, 'First Name', _firstNameController),
+                  _buildEditableField(
+                    colors,
+                    'First Name',
+                    _firstNameController,
+                  ),
                   const SizedBox(height: 16),
                   _buildEditableField(colors, 'Date of Birth', _dobController),
                   const SizedBox(height: 16),
@@ -298,7 +305,11 @@ class _LoadingState extends StatelessWidget {
             child: Text(
               message,
               key: ValueKey(message),
-              style: TextStyle(color: colors.muted, fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: colors.muted,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -323,11 +334,7 @@ class _ErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                color: colors.danger,
-                size: 42,
-              ),
+              Icon(Icons.error_outline_rounded, color: colors.danger, size: 42),
               const SizedBox(height: 12),
               Text(
                 'Document review failed',
