@@ -1,3 +1,8 @@
+# This branch (high-power) is the full-power, accurate deployment target —
+# sized for a real t3.medium+ instance (buffalo_l InsightFace at 640px,
+# comfortable per-service memory limits). `main` carries a deliberately
+# trimmed-down config for a free-tier t3.micro demo (buffalo_s/320px,
+# every service capped to its floor) — don't port main's sizing here.
 services:
   db:
     image: pgvector/pgvector:pg16

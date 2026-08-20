@@ -127,12 +127,23 @@ async def readiness_check(db: Session = Depends(deps.get_db)):
     # Check AI Service
     import httpx
     from backend.core.config import settings
+    ai_url = f"{settings.AI_SERVICE_URL}/docs"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{settings.AI_SERVICE_URL}/docs", timeout=2.0)
-            health_status["checks"]["ai_service"] = "ok" if resp.status_code == 200 else "error"
+            resp = await client.get(ai_url, timeout=5.0)
+            health_status["checks"]["ai_service"] = (
+                "ok" if resp.status_code == 200 else f"error: HTTP {resp.status_code} from {ai_url}"
+            )
+            if resp.status_code != 200:
+                health_status["status"] = "not_ready"
     except Exception as e:
-        health_status["checks"]["ai_service"] = f"error: {str(e)}"
+        # str(e) is often empty for connection-level failures (e.g.
+        # httpx.ConnectTimeout) — include the exception type and the URL
+        # actually being probed so this is still actionable, since
+        # AI_SERVICE_URL misconfiguration is the most common cause of this
+        # check failing (wrong host/port for the deployment topology, or
+        # the ai-service process simply isn't up).
+        health_status["checks"]["ai_service"] = f"error: {type(e).__name__}: {e} (probing {ai_url})"
         health_status["status"] = "not_ready"
         
     status_code = 200 if health_status["status"] == "ready" else 503

@@ -41,38 +41,47 @@ pub-entry/
 
 ---
 
-## ⚡ How to Start the Services
+## ⚡ How to Start the Services (local dev, without Docker)
 
-Ensure you start the services in the following order:
+Ensure you start the services in the following order. This path runs each service as a plain local process — it does **not** use `docker-compose.yml` (that's the production path, see below); mixing the two will cause port collisions since compose also starts `ai-service`/`backend`/`frontend` containers on the same ports.
 
 ### 1. External Dependencies (PostgreSQL & Redis)
-If your configuration uses PostgreSQL/Redis, bring them up via Docker Compose:
+You need a local Postgres (with the `pgvector` extension) and Redis reachable at the ports in `backend/.env` (defaults: `5432`/`6379`). The quickest way is the two infra-only containers from `start_services.sh`, which use the same default ports so no `.env` edits are needed:
 ```bash
-docker compose up -d
+./start_services.sh
 ```
+If you already have Postgres/Redis running locally on those ports, skip this script entirely.
 
 ### 2. AI Processing Microservice (`ai-service`)
-This service runs OpenCV heuristics and EasyOCR extraction on port `8001`.
+This service runs OpenCV heuristics, EasyOCR, and InsightFace face-matching on port `8001`.
 ```bash
-cd ai-service
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+./start_ai_service.sh
+```
+First run downloads the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights — this can take a few minutes and needs internet access. Verify it's actually up before moving on:
+```bash
+curl http://localhost:8001/docs
 ```
 
 ### 3. Backend Orchestrator (`backend`)
-This service handles database storage, visitor profiles, and venue statistics on port `8000`.
+This service handles database storage, visitor profiles, venue statistics, and S3 uploads on port `8000`. Needs `backend/.env` populated (copy from `backend/.env.example`) — in particular `SECRET_KEY`, `S3_BUCKET_NAME`/AWS credentials or an `S3_ENDPOINT_URL` for local MinIO, and `AI_SERVICE_URL` (defaults to `http://localhost:8001`, correct as long as ai-service is running locally per step 2).
 ```bash
-cd backend
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+./start_backend.sh
 ```
+Verify both the backend itself and its connection to Postgres/Redis/ai-service:
+```bash
+curl http://localhost:8000/health   # backend itself
+curl http://localhost:8000/ready    # backend + db + redis + ai-service, each checked individually
+```
+If `/ready` reports `ai_service` as an error, ai-service either isn't running or `AI_SERVICE_URL` in `backend/.env` doesn't point at it — this is the single most common cause of "backend can't reach the AI service" locally.
 
 ### 4. Next.js Gate Dashboard (`frontend`)
 This client dashboard interfaces with the backend and runs the user interface on port `3000`.
 ```bash
 cd frontend/frontend
+cp .env.example .env   # if you haven't already — sets NEXT_PUBLIC_API_URL
 npm run dev
 ```
+`NEXT_PUBLIC_API_URL` is read at server start (`src/lib/api.ts`'s `getApiBase()`) — if you change it, restart `npm run dev`, a hot-reload isn't enough. Leave it unset for local dev against a backend on the same machine; it falls back to `http://<hostname>:8000/api/v1` automatically.
 
 ---
 
@@ -93,9 +102,13 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 
 ## 🚀 Production Deployment (Docker Compose on EC2 t3.medium)
 
-`db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized to fit a **t3.medium (2 vCPU / 4GB RAM)**. Verification images go straight to real **S3** — there is no local object-storage container to run or back up. Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on.
+**This branch (`high-power`) is the full-power, accurate deployment target — use it for any real deployment.** `db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized for a **t3.medium (2 vCPU / 4GB RAM)**. `ai-service` uses the full `buffalo_l` InsightFace pack at a 640px detector input — the accuracy this project is designed around — and every service gets a comfortable memory budget rather than being squeezed. Verification images go straight to real **S3** — there is no local object-storage container to run or back up.
 
-t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, move to an `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on.
+
+t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, move to a `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+
+> **A separate `main` branch exists as a trimmed-down free-tier demo** (`buffalo_s`/320px InsightFace, every service memory-capped to its floor, tuned for a t3.micro's 1GB RAM + swap) — that's a deliberately degraded config for running a demo at zero cost, not something to pull settings from into this branch. Use `high-power` for anything that needs to actually work well.
 
 ### 1. Create the S3 bucket and IAM role
 ```bash
@@ -123,7 +136,7 @@ Verification images are keyed into two prefixes inside the one bucket, not two b
 Because it's a prefix split within one bucket rather than two buckets, a bulk "wipe everything routine" operation is just `aws s3 rm s3://<bucket>/scans/unflagged/ --recursive` — `scans/flagged/` is structurally untouched by that command.
 
 ### 2. Launch the EC2 instance
-- **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in model weights is large).
+- **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in `buffalo_l` model weights is large).
 - **IAM instance profile**: `venuepass-ec2-profile` from step 1.
 - **Security group**: 22 (SSH, your IP only), 80/443 if fronting with a reverse proxy (recommended, see step 5) or 3000/8000 directly otherwise. Nothing else public — `docker-compose.yml` binds Postgres/Redis/ai-service to `127.0.0.1` so they're unreachable outside the box regardless.
 - **User data**: paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top first). It installs Docker, adds a 2GB swap file, clones the repo, and registers a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
@@ -168,7 +181,7 @@ Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy it
 - **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires `scans/unflagged/` objects after 7 days regardless — flagged customers' images (`scans/flagged/`) are exempt from both the cron and the lifecycle rule, by design.
 - **Resource limits**: every service in `docker-compose.yml` has a `deploy.resources.limits.memory` cap so one runaway container (most likely `ai-service` under burst load) can't OOM the whole box; Docker will restart a container that hits its cap rather than letting the kernel OOM-killer pick a victim.
 - **Restart on reboot**: `restart: unless-stopped` handles container crashes, but a full instance reboot needs the Docker daemon to come up and then `docker compose up` to run again — that's what the `venuepass.service` systemd unit from the bootstrap script does. Verify it after first boot with `systemctl status venuepass`.
-- **`start_services.sh`** (podman-based, ports 5433/6380) is superseded by `docker-compose.yml` for production; kept only for local non-Docker development.
+- **`start_services.sh`** (podman-based, Postgres+Redis only, standard ports) is superseded by `docker-compose.yml` for production; kept only for local non-Docker development.
 - Not verified end-to-end in this development sandbox (no Docker daemon or AWS credentials available here) — run `docker compose config` locally and a real `docker compose up -d --build` on the target EC2 instance to confirm the build and S3 connectivity succeed there.
 
 ---
