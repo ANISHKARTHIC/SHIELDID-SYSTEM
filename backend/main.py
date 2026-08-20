@@ -167,9 +167,10 @@ async def readiness_check(db: Session = Depends(deps.get_db)):
         
     # Check AI Service
     import httpx
+    from backend.core.config import settings
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://localhost:8001/docs", timeout=2.0)
+            resp = await client.get(f"{settings.AI_SERVICE_URL}/docs", timeout=2.0)
             health_status["checks"]["ai_service"] = "ok" if resp.status_code == 200 else "error"
     except Exception as e:
         health_status["checks"]["ai_service"] = f"error: {str(e)}"

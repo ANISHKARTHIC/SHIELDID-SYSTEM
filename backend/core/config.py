@@ -13,16 +13,35 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "pub_entry_db"
     
     REDIS_URL: str = "redis://localhost:6379/0"
-    
-    MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
+
+    # --- Object storage (S3 / S3-compatible) ---
+    # In AWS, leave S3_ENDPOINT_URL unset so boto3 talks to real AWS S3 and
+    # picks up credentials from the task/instance IAM role. For local dev
+    # against MinIO, set S3_ENDPOINT_URL=http://localhost:9000 plus the
+    # MinIO access/secret keys below.
+    S3_BUCKET_NAME: str = "verification-images"
+    AWS_REGION: str = "us-east-1"
+    S3_ENDPOINT_URL: str | None = None
+    S3_ACCESS_KEY_ID: str | None = None
+    S3_SECRET_ACCESS_KEY: str | None = None
+    S3_USE_PATH_STYLE: bool = False  # MinIO requires path-style addressing
+
+    # Legacy MinIO-named vars kept as fallbacks so existing .env files/compose
+    # configs keep working without edits.
+    MINIO_ENDPOINT: str | None = None
+    MINIO_ACCESS_KEY: str | None = None
+    MINIO_SECRET_KEY: str | None = None
     MINIO_SECURE: bool = False
-    
+
     SECRET_KEY: str = "CHANGE_THIS_TO_A_SECURE_RANDOM_STRING"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
+
+    # URL the backend uses to reach the AI microservice. In AWS this should
+    # be the internal service-discovery/ALB address (e.g. ECS Cloud Map DNS
+    # or an internal load balancer DNS name), not localhost.
+    AI_SERVICE_URL: str = "http://localhost:8001"
+
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         # If DB_ENGINE is set to sqlite or postgres unavailable, allow sqlite
@@ -30,7 +49,31 @@ class Settings(BaseSettings):
         if custom_uri:
             return custom_uri
         return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        
+
+    @property
+    def resolved_s3_endpoint_url(self) -> str | None:
+        """S3_ENDPOINT_URL wins; otherwise fall back to a legacy MINIO_ENDPOINT."""
+        if self.S3_ENDPOINT_URL:
+            return self.S3_ENDPOINT_URL
+        if self.MINIO_ENDPOINT:
+            scheme = "https" if self.MINIO_SECURE else "http"
+            return f"{scheme}://{self.MINIO_ENDPOINT}"
+        return None
+
+    @property
+    def resolved_s3_access_key(self) -> str | None:
+        return self.S3_ACCESS_KEY_ID or self.MINIO_ACCESS_KEY
+
+    @property
+    def resolved_s3_secret_key(self) -> str | None:
+        return self.S3_SECRET_ACCESS_KEY or self.MINIO_SECRET_KEY
+
+    @property
+    def resolved_s3_path_style(self) -> bool:
+        # MinIO (or any endpoint override) needs path-style addressing;
+        # real AWS S3 uses virtual-hosted style.
+        return self.S3_USE_PATH_STYLE or self.resolved_s3_endpoint_url is not None
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

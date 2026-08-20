@@ -1,0 +1,15 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-verification-images",
+      "Status": "Enabled",
+      "Filter": {},
+      "Expiration": {
+        "Days": 30
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

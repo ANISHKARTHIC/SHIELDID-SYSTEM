@@ -11,5 +11,5 @@ python-multipart
 redis
 httpx
 pgvector
-minio
+boto3
 apscheduler

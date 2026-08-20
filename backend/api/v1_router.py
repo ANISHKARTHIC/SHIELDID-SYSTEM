@@ -12,9 +12,10 @@ from backend.models.models import Customer, Document, VerificationSession, Black
 from backend.schemas.schemas import BlacklistCreate, IncidentCreate, VerificationDecision
 from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
+from backend.core.config import settings
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
-AI_SERVICE_URL = "http://localhost:8001"
+AI_SERVICE_URL = settings.AI_SERVICE_URL
 
 @router.post("/session/start")
 async def start_session(

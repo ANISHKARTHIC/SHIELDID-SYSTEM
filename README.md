@@ -91,38 +91,63 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 
 ---
 
-## 🚀 Production Deployment (Docker Compose, single VM)
+## 🚀 Production Deployment (Docker Compose on EC2 t3.medium)
 
-All four services (`db`, `redis`, `minio`, `ai-service`, `backend`, `frontend`) are defined in the root `docker-compose.yml`. This is the recommended way to run the full stack on a single cloud VM.
+`db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized to fit a **t3.medium (2 vCPU / 4GB RAM)**. Verification images go straight to real **S3** — there is no local object-storage container to run or back up. Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on.
 
-### 1. Provision a VM and install Docker
-Any VM with Docker + the Compose plugin works (e.g. a $20-40/mo 4 vCPU / 8GB RAM instance — the AI service, mainly EasyOCR + InsightFace CPU inference, is the heaviest consumer). Install Docker via your provider's guide or [docs.docker.com](https://docs.docker.com/engine/install/).
+t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, move to an `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
 
-### 2. Configure secrets
+### 1. Create the S3 bucket and IAM role
 ```bash
-cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD, and SECRET_KEY.
-# Generate a real SECRET_KEY with:
-openssl rand -hex 32
+aws s3api create-bucket --bucket venuepass-verification-images-prod --region us-east-1
+aws s3api put-bucket-encryption --bucket venuepass-verification-images-prod \
+  --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+aws s3api put-public-access-block --bucket venuepass-verification-images-prod \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-lifecycle-configuration --bucket venuepass-verification-images-prod \
+  --lifecycle-configuration file://deploy/aws/s3-lifecycle.json
+
+aws iam create-role --role-name venuepass-ec2-role \
+  --assume-role-policy-document file://deploy/aws/ec2-trust-policy.json
+aws iam put-role-policy --role-name venuepass-ec2-role \
+  --policy-name venuepass-s3-access --policy-document file://deploy/aws/s3-iam-policy.json
+aws iam create-instance-profile --instance-profile-name venuepass-ec2-profile
+aws iam add-role-to-instance-profile --instance-profile-name venuepass-ec2-profile --role-name venuepass-ec2-role
+```
+No access keys are stored anywhere — `backend/services/storage_service.py` picks up credentials from this instance profile automatically via boto3's default credential chain.
+
+### 2. Launch the EC2 instance
+- **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in model weights is large).
+- **IAM instance profile**: `venuepass-ec2-profile` from step 1.
+- **Security group**: 22 (SSH, your IP only), 80/443 if fronting with a reverse proxy (recommended, see step 5) or 3000/8000 directly otherwise. Nothing else public — `docker-compose.yml` binds Postgres/Redis/ai-service to `127.0.0.1` so they're unreachable outside the box regardless.
+- **User data**: paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top first). It installs Docker, adds a 2GB swap file, clones the repo, and registers a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
+
+### 3. Configure secrets
+SSH in and finish the `.env` the bootstrap script generated:
+```bash
+cd /opt/venuepass
+$EDITOR .env   # set POSTGRES_PASSWORD and S3_BUCKET_NAME=venuepass-verification-images-prod
 ```
 `.env` is git-ignored — never commit it. If you're deploying behind a domain, also set `NEXT_PUBLIC_API_URL` to the backend's public URL (e.g. `https://api.yourdomain.com/api/v1`) — this is baked into the frontend at **build** time, so changing it later requires a rebuild (`docker compose build frontend`), not just a restart.
 
-### 3. Build and start
+### 4. Build and start
 ```bash
 docker compose up -d --build
 ```
-First build downloads and bakes in the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency.
+First build downloads and bakes in the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency. Expect this to take longer on a t3.medium than on a beefier dev machine; it's a one-time cost per image rebuild.
 
-### 4. Verify
+### 5. Verify
 ```bash
 docker compose ps                       # all services healthy
+free -h                                  # confirm memory headroom under load
 curl http://localhost:8000/health        # backend
+curl http://localhost:8000/ready         # backend + db + redis + ai-service connectivity
 curl http://localhost:8001/docs          # ai-service
 curl http://localhost:3000               # frontend
 ```
 Database tables are auto-created on backend startup, and a bootstrap `super_admin` account (`admin@pub-entry.local`) is auto-seeded with a random password printed once to the backend container logs (`docker compose logs backend | grep "Bootstrap super_admin"`) — log in with it immediately and create real staff accounts via the Staff Accounts admin page, since self-registration is disabled by design.
 
-### 5. Put a reverse proxy in front (recommended)
+### 6. Put a reverse proxy in front (recommended)
 For a real domain with HTTPS, put [Caddy](https://caddyserver.com/) (or nginx + certbot) in front of ports 3000 (frontend) and 8000 (backend). A minimal `Caddyfile`:
 ```
 yourdomain.com {
@@ -130,9 +155,65 @@ yourdomain.com {
     reverse_proxy /* localhost:3000
 }
 ```
-Caddy handles Let's Encrypt certificate issuance/renewal automatically.
+Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same t3.medium alongside the compose stack.
 
 ### Notes
-- **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console.
+- **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires objects after 30 days regardless.
+- **Resource limits**: every service in `docker-compose.yml` has a `deploy.resources.limits.memory` cap so one runaway container (most likely `ai-service` under burst load) can't OOM the whole box; Docker will restart a container that hits its cap rather than letting the kernel OOM-killer pick a victim.
+- **Restart on reboot**: `restart: unless-stopped` handles container crashes, but a full instance reboot needs the Docker daemon to come up and then `docker compose up` to run again — that's what the `venuepass.service` systemd unit from the bootstrap script does. Verify it after first boot with `systemctl status venuepass`.
 - **`start_services.sh`** (podman-based, ports 5433/6380) is superseded by `docker-compose.yml` for production; kept only for local non-Docker development.
-- Not verified end-to-end in this development sandbox (no Docker daemon available here) — run `docker compose config` and a real `docker compose up -d --build` on your target VM/machine to confirm the build succeeds there.
+- Not verified end-to-end in this development sandbox (no Docker daemon or AWS credentials available here) — run `docker compose config` locally and a real `docker compose up -d --build` on the target EC2 instance to confirm the build and S3 connectivity succeed there.
+
+---
+
+## ☁️ Alternative: ECS/Fargate + RDS (multi-instance scale-out)
+
+The single-VM t3.medium setup above is the recommended starting point. If verification volume outgrows one instance, `backend` and `ai-service` are two independently deployable, stateless containers (each has its own `Dockerfile`) that fit ECS/Fargate services behind an ALB, with managed AWS services standing in for the containers that only exist for convenience in `docker-compose.yml` (`db` → RDS, `redis` → ElastiCache). S3 setup is identical to step 1 above — the same bucket and IAM policy work for both deployment styles.
+
+### 1. S3 (object storage for verification images)
+```bash
+aws s3api create-bucket --bucket venuepass-verification-images-prod --region us-east-1
+aws s3api put-bucket-encryption --bucket venuepass-verification-images-prod \
+  --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+aws s3api put-public-access-block --bucket venuepass-verification-images-prod \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+```
+Add a lifecycle rule to auto-expire objects (verification images are already deleted by the retention cron via the API, but a bucket-level backstop is good practice):
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket venuepass-verification-images-prod \
+  --lifecycle-configuration file://deploy/aws/s3-lifecycle.json
+```
+
+The backend talks to S3 via `boto3` (`backend/services/storage_service.py`). **Do not put access keys in the container** — attach the IAM policy in [`deploy/aws/s3-iam-policy.json`](deploy/aws/s3-iam-policy.json) to the ECS **task role** (not the task execution role) and boto3 picks up credentials automatically from the container's IAM identity. Only set these two env vars on the backend task/service:
+```
+S3_BUCKET_NAME=venuepass-verification-images-prod
+AWS_REGION=us-east-1
+```
+Leave `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` **unset** in AWS — those exist only so the same code can target an S3-compatible endpoint (e.g. MinIO) for local development outside Docker.
+
+### 2. RDS (Postgres) and ElastiCache (Redis)
+Provision an RDS PostgreSQL instance (`pgvector` extension: use RDS Postgres 15+ and run `CREATE EXTENSION vector;` once, or use Aurora PostgreSQL which bundles it) and an ElastiCache Redis cluster in the same VPC as the ECS tasks. Set on the backend task:
+```
+DATABASE_URL=postgresql+psycopg2://user:pass@your-instance.xxxx.rds.amazonaws.com:5432/pub_entry_db
+REDIS_URL=redis://your-cluster.xxxx.cache.amazonaws.com:6379/0
+```
+(`DATABASE_URL` overrides the individual `POSTGRES_*` vars — see `backend/core/config.py`.)
+
+### 3. ECS services
+- **`ai-service`**: CPU-bound (EasyOCR + InsightFace ONNX inference) — no external state, no IAM permissions needed. Size the task for at least 2 vCPU / 4GB; model weights are baked into the image at build time (see `ai-service/Dockerfile`), so cold start has no internet dependency.
+- **`backend`**: give it the S3 task role above, plus network access to RDS/ElastiCache. Set `AI_SERVICE_URL` to the `ai-service` ECS service's internal address — either Cloud Map service-discovery DNS (`http://ai-service.internal:8001`) or an internal ALB/NLB in front of it. **This must not be `localhost`** in ECS, since each service is a separate task.
+- Both images expose a container `HEALTHCHECK` (`/health` on the backend, `/docs` on ai-service) and the backend additionally exposes `/ready` for ALB target-group health checks that verify DB/Redis/AI-service connectivity end-to-end.
+- Push both images to ECR:
+  ```bash
+  aws ecr create-repository --repository-name venuepass-backend
+  aws ecr create-repository --repository-name venuepass-ai-service
+  docker build -t venuepass-backend -f backend/Dockerfile .
+  docker build -t venuepass-ai-service ai-service/
+  # tag + docker push to each repo's ECR URI
+  ```
+
+### 4. Secrets
+Put `SECRET_KEY`, `POSTGRES_PASSWORD`/`DATABASE_URL`, and `REDIS_URL` in AWS Secrets Manager or SSM Parameter Store and reference them from the ECS task definition's `secrets` block — do not bake them into the image or set them as plain task-definition environment variables.
+
+### 5. Frontend
+Deploy the Next.js frontend to its own ECS service (or Amplify/CloudFront+S3 for a purely static export) with `NEXT_PUBLIC_API_URL` set to the backend ALB's public HTTPS URL at **build** time.
