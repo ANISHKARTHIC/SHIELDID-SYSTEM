@@ -21,11 +21,11 @@ COPY . .
 ENV INSIGHTFACE_MODEL_ROOT=/app/model_cache/insightface
 ENV EASYOCR_MODEL_DIR=/app/model_cache/easyocr
 RUN python -c "\
-from app.services.providers.insightface_provider import InsightFaceProvider; \
-from app.services.ocr.easy_ocr_provider import EasyOCRProvider; \
-InsightFaceProvider().load_model(); \
-EasyOCRProvider()._get_reader(); \
-print('Model warm-up complete.')"
+    from app.services.providers.insightface_provider import InsightFaceProvider; \
+    from app.services.ocr.easy_ocr_provider import EasyOCRProvider; \
+    InsightFaceProvider().load_model(); \
+    EasyOCRProvider()._get_reader(); \
+    print('Model warm-up complete.')"
 
 RUN useradd --create-home --uid 1000 appuser \
     && chown -R appuser:appuser /app
@@ -33,7 +33,7 @@ USER appuser
 
 EXPOSE 8001
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:8001/docs || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1"]

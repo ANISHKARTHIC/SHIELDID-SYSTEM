@@ -4,16 +4,19 @@ from backend.db.redis import get_redis
 
 logger = logging.getLogger("event_bus")
 
+from backend.core.config import settings
+
 class EventBus:
     def __init__(self):
-        # In a real app we'd inject this, but for simplicity we instantiate a client here
-        # or depend on the fast API dependency. Since this might be called globally,
-        # we will use the connection pool from redis dependency.
         from redis import Redis
         import os
-        redis_host = os.getenv("REDIS_HOST", "localhost")
-        redis_port = int(os.getenv("REDIS_PORT", 6379))
-        self.redis_client = Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+        redis_url = os.getenv("REDIS_URL", settings.REDIS_URL)
+        if redis_url:
+            self.redis_client = Redis.from_url(redis_url, decode_responses=True)
+        else:
+            redis_host = os.getenv("REDIS_HOST", "redis")
+            redis_port = int(os.getenv("REDIS_PORT", 6379))
+            self.redis_client = Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
 
     def publish(self, channel: str, event_type: str, payload: dict):
         """
