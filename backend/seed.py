@@ -20,6 +20,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+from sqlalchemy import text
 from backend.db.session import engine, SessionLocal
 from backend.db.base import Base
 from backend.models.models import Venue, User, RoleEnum
@@ -33,6 +34,10 @@ DEFAULT_ADMIN_PASSWORD = "ChangeMe123!"
 
 
 def seed():
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        conn.commit()
+
     Base.metadata.create_all(bind=engine)
 
     admin_email = os.getenv("SEED_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL)
