@@ -13,6 +13,16 @@ logger = logging.getLogger("insightface_provider")
 # weights don't re-download on every container start.
 MODEL_CACHE_ROOT = os.getenv("INSIGHTFACE_MODEL_ROOT", os.path.expanduser("~/.insightface"))
 
+# buffalo_l (~600MB, higher accuracy) is the right default on a real
+# instance (t3.medium+). buffalo_s (~160MB, still real RetinaFace+ArcFace
+# inference, lower accuracy) is what fits alongside EasyOCR+torch in the
+# ~1GB a t3.micro free-tier demo actually has. Same for det_size: 640x640
+# is InsightFace's own default and costs more peak memory/compute per
+# inference than a demo needs — 320x320 is still enough to detect one
+# reasonably-framed face in a phone-camera ID photo.
+INSIGHTFACE_MODEL_PACK = os.getenv("INSIGHTFACE_MODEL_PACK", "buffalo_l")
+INSIGHTFACE_DET_SIZE = int(os.getenv("INSIGHTFACE_DET_SIZE", "640"))
+
 class InsightFaceProvider(BaseFaceRecognition):
     def __init__(self):
         self.app = None
@@ -23,13 +33,16 @@ class InsightFaceProvider(BaseFaceRecognition):
             from insightface.app import FaceAnalysis
             # Support GPU execution falling back to CPU
             self.app = FaceAnalysis(
-                name='buffalo_l',
+                name=INSIGHTFACE_MODEL_PACK,
                 root=MODEL_CACHE_ROOT,
                 providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
             )
             # ctx_id=0 for GPU. If CUDA is missing, providers list will safely fallback to CPU.
-            self.app.prepare(ctx_id=0, det_size=(640, 640))
-            logger.info("InsightFace model loaded successfully.")
+            self.app.prepare(ctx_id=0, det_size=(INSIGHTFACE_DET_SIZE, INSIGHTFACE_DET_SIZE))
+            logger.info(
+                f"InsightFace model loaded successfully "
+                f"(pack={INSIGHTFACE_MODEL_PACK}, det_size={INSIGHTFACE_DET_SIZE})."
+            )
         except ImportError:
             logger.error("insightface module not installed. Run `pip install insightface onnxruntime`")
             raise
