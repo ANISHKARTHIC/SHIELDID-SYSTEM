@@ -1,10 +1,10 @@
-# This branch (fix/ai-service-connectivity) is tuned for a t3.micro
-# free-tier demo box: 1GB RAM + swap as backstop, not primary memory.
-# db(160M) + redis(48M) + backend(256M) + frontend(160M) = 624M hard-capped
-# real RAM, leaving ai-service the rest of the 1GB plus swap for its model
-# weights (see the ai-service service below for why it has no hard limit).
-# `main` targets a real t3.medium+ instance and is not this tight — do not
-# port these limits back to main.
+# `main` is tuned for a t3.micro free-tier demo box: 1GB RAM + swap as
+# backstop, not primary memory. db(160M) + redis(48M) + backend(256M) +
+# frontend(160M) = 624M hard-capped real RAM, leaving ai-service the rest
+# of the 1GB plus swap for its model weights (see the ai-service service
+# below for why it has no hard limit). The `high-power` branch targets a
+# real t3.medium+ instance and is not this tight — do not port these
+# limits over there, and don't port high-power's limits back here.
 services:
   db:
     image: pgvector/pgvector:pg16
