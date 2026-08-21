@@ -4,6 +4,19 @@ import '../../../../core/network/dio_client.dart';
 class RemoteDataSource {
   final Dio _dio = DioClient().dio;
 
+  /// classify/ocr/face-match all run real CPU-bound ML inference
+  /// (EasyOCR/InsightFace) server-side — the backend itself allows up to
+  /// 180s for each of these when calling ai-service (v1_router.py), but
+  /// the shared DioClient default is only 15s (tuned for fast JSON
+  /// endpoints). A cold-start EasyOCR model load, or just slower CPU-only
+  /// inference on a smaller cloud instance than whatever was used for
+  /// local testing, can easily exceed 15s without being a real failure —
+  /// the client was giving up before the server finished, surfacing as a
+  /// misleading "Could not read this document" error. These three calls
+  /// get their own longer receive timeout to match the backend's budget;
+  /// every other (fast) endpoint keeps the shared client's 15s default.
+  static const _inferenceTimeout = Duration(seconds: 150);
+
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await _dio.post(
       '/auth/login',
@@ -47,6 +60,7 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/classify',
       data: formData,
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );
     return response.data;
   }
@@ -58,7 +72,11 @@ class RemoteDataSource {
     final file = await MultipartFile.fromFile(imagePath, filename: 'id.jpg');
     final formData = FormData.fromMap({'file': file});
 
-    final response = await _dio.post('/session/$sessionId/ocr', data: formData);
+    final response = await _dio.post(
+      '/session/$sessionId/ocr',
+      data: formData,
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
+    );
     return response.data;
   }
 
@@ -75,6 +93,7 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/face',
       data: formData,
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );
     return response.data;
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'face_capture_view.dart';
 import 'dart:io';
@@ -173,7 +174,19 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not read this document. Please try again.';
+          // A timeout means the server was still working (document/face
+          // scanning runs real ML inference and can legitimately take a
+          // while, especially on a cold-started or CPU-only backend) —
+          // distinct from an actual bad/illegible photo, so it gets its
+          // own message rather than the generic "could not read" one,
+          // which reads as if the photo itself was rejected.
+          final isTimeout = e is DioException &&
+              (e.type == DioExceptionType.receiveTimeout ||
+                  e.type == DioExceptionType.sendTimeout ||
+                  e.type == DioExceptionType.connectionTimeout);
+          _error = isTimeout
+              ? 'The verification service is taking longer than usual. Please try again.'
+              : 'Could not read this document. Please try again.';
           _isLoading = false;
         });
       }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'decision_view.dart';
 import '../../data/datasources/remote_data_source.dart';
@@ -184,7 +185,17 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not verify identity. Please try again.';
+          // Face matching runs real ML inference server-side and can
+          // legitimately take a while (cold-started model, CPU-only
+          // backend) — a timeout isn't the same failure as an actual
+          // match/verification error, so it gets its own message.
+          final isTimeout = e is DioException &&
+              (e.type == DioExceptionType.receiveTimeout ||
+                  e.type == DioExceptionType.sendTimeout ||
+                  e.type == DioExceptionType.connectionTimeout);
+          _error = isTimeout
+              ? 'The verification service is taking longer than usual. Please try again.'
+              : 'Could not verify identity. Please try again.';
           _isProcessing = false;
         });
       }

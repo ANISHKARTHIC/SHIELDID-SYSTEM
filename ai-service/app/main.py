@@ -22,6 +22,26 @@ from app.core.model_registry import model_registry
 async def lifespan(app: FastAPI):
     # Load AI models on startup
     model_registry.initialize_models()
+
+    # Warm up the EasyOCR reader now, in a background thread, rather than
+    # leaving it to lazily load on whatever request happens to hit /ocr
+    # first — with the factory singleton fix (ocr/factory.py) the reader
+    # is now reused across requests, but the very first request would
+    # still pay the full model-load cost if nothing warms it ahead of
+    # time. Runs in a thread so it doesn't block the app from serving
+    # other traffic (or being marked ready) while EasyOCR's weights load.
+    import asyncio
+    from app.services.ocr.factory import get_ocr_provider
+
+    def _warm_ocr():
+        try:
+            get_ocr_provider()._get_reader()
+            logging.getLogger("ai_main").info("EasyOCR reader warmed up.")
+        except Exception as e:
+            logging.getLogger("ai_main").error(f"EasyOCR warm-up failed: {e}")
+
+    asyncio.get_event_loop().run_in_executor(None, _warm_ocr)
+
     yield
     # Clean up if needed
     pass
@@ -152,6 +172,8 @@ async def classify_document_endpoint(file: UploadFile = File(...)):
     """Step 1: Determine if the uploaded image is a valid identity document,
     and which supported document type it is, so OCR can route correctly."""
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents)
     result = classify_document_real(contents)
     if result["is_valid"]:
         type_result = classify_document(contents, file.filename or "")
@@ -175,6 +197,8 @@ async def extract_ocr_endpoint(file: UploadFile = File(...), document_type: str 
     document_type determined during /classify (defaults to UK driving licence
     for backward compatibility if the caller omits it)."""
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents)
 
     from app.services.ocr.factory import get_ocr_provider
     ocr_provider = get_ocr_provider()
@@ -209,6 +233,8 @@ async def face_match_endpoint(file: UploadFile = File(...), reference_embedding:
     import os
 
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents)
     face_provider = model_registry.get_provider('face')
     if face_provider is None or face_provider.app is None:
         raise HTTPException(status_code=503, detail="Face recognition model is not loaded")

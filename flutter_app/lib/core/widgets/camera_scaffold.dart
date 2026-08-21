@@ -339,37 +339,23 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
             ),
           ),
 
-          // Bottom controls: gallery and shutter are laid out relative to
-          // the true center (Expanded flex either side) rather than a
-          // hardcoded SizedBox(width: 60) standing in for "the width of
-          // whatever's on the other side" — the previous fixed offset was
-          // only correct by coincidence and would drift out of alignment
-          // if either icon's tap target size ever changed.
+          // Bottom controls: the shutter is pinned to the true horizontal
+          // center via Stack + Center (not affected by anything else in
+          // the row), and the gallery button is positioned independently
+          // relative to the screen edge. The previous Row-based layout
+          // paired an Align(centerRight)-wrapped gallery button on the
+          // left with an unaligned bare SizedBox spacer on the right —
+          // those aren't equivalent, so the shutter was visibly off-center
+          // (shifted toward the gallery side) instead of centered.
           if (!widget.isProcessing)
             SafeArea(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 28),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 28),
+                child: SizedBox(
+                  height: 76,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 32),
-                            child: _CircleIconButton(
-                              icon: Icons.photo_library_rounded,
-                              tooltip: 'Upload from Gallery',
-                              onPressed: () {
-                                HapticFeedback.selectionClick();
-                                widget.onPickFromGallery();
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
                       GestureDetector(
                         onTap: _handleCapture,
                         child: Container(
@@ -390,8 +376,16 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                           ),
                         ),
                       ),
-                      const Expanded(
-                        child: SizedBox(width: _CircleIconButton.defaultDiameter),
+                      Positioned(
+                        left: 32,
+                        child: _CircleIconButton(
+                          icon: Icons.photo_library_rounded,
+                          tooltip: 'Upload from Gallery',
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            widget.onPickFromGallery();
+                          },
+                        ),
                       ),
                     ],
                   ),
