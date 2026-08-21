@@ -191,5 +191,45 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertTrue(res["valid"], res["errors"])
         self.assertEqual(res["sanitized_num"][13], "1")  # I -> 1, not left as I
 
+    def test_clean_address_fixes_house_code_letter_digit_confusion(self):
+        # Regression: found on a real card — "H89D" (house identifier)
+        # OCR'd as "H8gD", 'g' standing in for '9'.
+        result = self.processor._clean_address("H8gD 80 HOYLE STREET, SHEFFIELD")
+        self.assertIn("H89D", result)
+        self.assertNotIn("H8gD", result)
+
+    def test_clean_address_strips_trailing_garbled_fragment(self):
+        # Regression: a badly-read field 9 (licence categories) line with
+        # no leading digit label fell through the address-continuation
+        # loop's break check and got silently appended as trailing junk.
+        result = self.processor._clean_address(
+            "H89D 80 HOYLE STREET, SHEFFIELD 3,, e"
+        )
+        self.assertEqual(result, "H89D 80 HOYLE STREET, SHEFFIELD 3")
+
+    def test_clean_address_leaves_genuine_text_untouched(self):
+        clean = "H89D 80 HOYLE STREET, SHEFFIELD 3, SHEFFIELD, S3 7LG"
+        self.assertEqual(self.processor._clean_address(clean), clean)
+
+    def test_address_stops_at_unlabeled_short_categories_fragment(self):
+        # Full pipeline: field 9 (categories) dropped its "9." label and
+        # OCR'd as a short garbled fragment — must not be swallowed into
+        # the address.
+        ocr_results = [
+            self._box("1. HENRY CHRISTY PAUL", y=80),
+            self._box("2. MISS GRACELIN PRIYANKA", y=110),
+            self._box("3. 08.11.2002 INDIA", y=140),
+            self._box("4a. 15.05.2026", y=170),
+            self._box("4b. 14.05.2036", y=200),
+            self._box("4c. DVLA", y=230),
+            self._box("5. HENRY061082GP9TF", y=260),
+            self._box("8. H89D 80 HOYLE STREET, SHEFFIELD 3,", y=290),
+            self._box("SHEFFIELD, S3 7LG", y=315),
+            self._box("e", y=340),  # garbled, label-less field 9 fragment
+        ]
+        result = self.processor.process(ocr_results)
+        self.assertNotIn("e", result["fields"]["address"].split(", ")[-1].strip())
+        self.assertNotIn(",,", result["fields"]["address"])
+
 if __name__ == "__main__":
     unittest.main()

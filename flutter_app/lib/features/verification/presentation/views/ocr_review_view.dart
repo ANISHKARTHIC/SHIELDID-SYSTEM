@@ -43,6 +43,13 @@ class _OCRReviewViewState extends State<OCRReviewView> {
   bool _licenceValid = true;
   static const _lowConfidenceThreshold = 70.0;
 
+  // Overall document-legitimacy result from the backend's DVLA-formula
+  // cross-check (validation.is_valid / validation.errors) — surfaced as a
+  // visible pass/fail banner rather than only being available buried in
+  // per-field warning icons or the backend log.
+  bool _documentValid = true;
+  List<String> _validationErrors = [];
+
   static const _notLegiblePlaceholder = 'NOT LEGIBLE';
 
   /// The backend returns this literal string when a field couldn't be
@@ -114,8 +121,17 @@ class _OCRReviewViewState extends State<OCRReviewView> {
       // know where the surname actually ends.
       final fields = extracted['fields'] as Map<String, dynamic>?;
       final confidences = extracted['confidences'] as Map<String, dynamic>?;
+      // extracted_data.validation is the DVLA-formula legitimacy check
+      // (surname/DOB/initials cross-checked against the licence number
+      // itself, from UKDrivingLicenceProcessor) — distinct from the
+      // top-level result['validation'], which only checks field
+      // completeness and age, not whether the licence number's own
+      // encoded data is internally consistent. The legitimacy banner
+      // needs the former.
+      final licenceValidation =
+          extracted['validation'] as Map<String, dynamic>?;
       final validationErrors =
-          (result['validation']?['errors'] as List?)?.cast<String>() ?? [];
+          (licenceValidation?['errors'] as List?)?.cast<String>() ?? [];
 
       if (mounted) {
         setState(() {
@@ -147,6 +163,9 @@ class _OCRReviewViewState extends State<OCRReviewView> {
             (e) => !e.toLowerCase().contains('licence number') &&
                 !e.toLowerCase().contains('mismatch'),
           );
+
+          _documentValid = licenceValidation?['is_valid'] as bool? ?? true;
+          _validationErrors = validationErrors;
 
           _isLoading = false;
         });
@@ -205,6 +224,10 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     ),
                   ),
                   const SizedBox(height: 18),
+                  if (_documentType == 'uk_driving_licence')
+                    _buildLegitimacyBanner(colors),
+                  if (_documentType == 'uk_driving_licence')
+                    const SizedBox(height: 14),
                   Text(
                     'Confirm extracted identity data before continuing.',
                     style: TextStyle(
@@ -297,6 +320,63 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                 ],
               ),
             ),
+    );
+  }
+
+  /// Surfaces the backend's DVLA-formula legitimacy check (surname/DOB/
+  /// initials cross-validated against the licence number's own encoded
+  /// data) as a visible pass/fail mark, instead of leaving it only
+  /// reachable via the per-field warning icon or the backend log.
+  Widget _buildLegitimacyBanner(AppColorsExt colors) {
+    final bg = _documentValid ? colors.successSoft : colors.dangerSoft;
+    final fg = _documentValid ? colors.success : colors.danger;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: fg.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _documentValid
+                    ? Icons.verified_rounded
+                    : Icons.gpp_bad_rounded,
+                color: fg,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _documentValid
+                    ? 'Licence number verified'
+                    : 'Licence number could not be verified',
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          if (!_documentValid && _validationErrors.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            ..._validationErrors.map(
+              (e) => Padding(
+                padding: const EdgeInsets.only(left: 28, top: 2),
+                child: Text(
+                  e,
+                  style: TextStyle(color: fg, fontSize: 12.5),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

@@ -1,6 +1,9 @@
 import re
+import logging
 from datetime import datetime
 from .base_processor import BaseDocumentProcessor
+
+logger = logging.getLogger("uk_driving_licence_processor")
 
 # Matches a DD-MM-YYYY-shaped date with . / - or one-or-more spaces as the
 # separator between groups — EasyOCR frequently drops small punctuation
@@ -61,6 +64,44 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 pass
 
         return ""
+
+    def _clean_address(self, address: str) -> str:
+        """
+        Normalizes an assembled address string: fixes letter/digit
+        confusion inside UK house-number-and-letter codes (e.g. a real
+        card's "H89D" OCR'd as "H8gD" — 'g' for '9' is a plausible visual
+        misread at small size), and strips stray trailing punctuation runs
+        left over from a dropped/garbled final box (e.g. "...SHEFFIELD
+        3,, e" from a badly-read field 9 fragment).
+        """
+        if not address:
+            return address
+
+        # UK addresses on these cards often start with a house identifier
+        # like "H89D" (letter, 2 digits, letter) — a plausible OCR misread
+        # is a lowercase letter standing in for a digit inside that run
+        # (confirmed real failure: "H89D" -> "H8gD", 'g' for '9'). Only
+        # correct a lowercase letter immediately between two uppercase/
+        # digit characters in a short (<=5 char) alphanumeric token — real
+        # words don't mix case like that, so this is safe to fix without
+        # touching genuine street/place names.
+        def fix_house_code(m: re.Match) -> str:
+            token = m.group(0)
+            return re.sub(
+                r'(?<=[A-Z0-9])[a-z](?=[A-Z0-9])',
+                lambda c: {"g": "9", "o": "0", "i": "1", "s": "5", "b": "8", "z": "2"}.get(c.group(0), c.group(0)),
+                token,
+            )
+        address = re.sub(r'\b[A-Za-z0-9]{2,5}\b', fix_house_code, address)
+
+        # Collapse stray trailing punctuation/orphan-fragment noise (",,",
+        # trailing single letters after a comma, etc.) left by a dropped or
+        # garbled final box.
+        address = re.sub(r'(,\s*){2,}', ', ', address)
+        address = re.sub(r',\s*[A-Za-z]{1,2}\s*$', '', address)
+        address = re.sub(r',\s*$', '', address)
+
+        return address.strip()
 
     def validate_licence_number(self, num: str, surname: str, dob: str, first_names: str) -> dict:
         """
@@ -211,7 +252,18 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 line.sort(key=lambda b: b["x"])
                 sorted_boxes.extend(line)
             boxes = sorted_boxes
-        
+
+        # Final spatial box order (text, y, confidence%) — the ground truth
+        # for diagnosing field-assembly bugs like address lines coming out
+        # in the wrong order or a stray box getting appended to a field:
+        # compare this against the raw (pre-sort) EasyOCR log from
+        # easy_ocr_provider.py to tell a genuine spatial mis-sort apart
+        # from noisy/misread text.
+        logger.info(
+            "Sorted boxes (text, y, confidence%%): %s",
+            [(b["text"], round(b["y"], 1), round(b["conf"], 1)) for b in boxes],
+        )
+
         # Output structure
         fields = {
             "surname": "",
@@ -345,10 +397,24 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 for next_idx in range(i+1, min(i+4, len(boxes))):
                     next_box = boxes[next_idx]
                     next_text = next_box["text"].upper()
-                    if re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or next_text in ["1", "2", "3", "4A", "4B", "4C", "5", "8", "9"]:
+                    # Field 9 (licence categories, e.g. "9. AM/A/B/I/K/Q")
+                    # often loses its "9." label to OCR, and a badly
+                    # misread categories line can end up as a short
+                    # fragment (e.g. a single stray letter) that doesn't
+                    # start with a digit — the original digit-only check
+                    # let that fall through and get silently appended to
+                    # the address as trailing junk. A short (<=4 char)
+                    # trailing box this far into the address is far more
+                    # likely to be exactly that than a genuine third
+                    # address line, so stop there too.
+                    is_new_field = re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or next_text in [
+                        "1", "2", "3", "4A", "4B", "4C", "5", "8", "9"
+                    ]
+                    is_short_trailing_fragment = len(addr_parts) >= 1 and len(next_text.strip()) <= 4
+                    if is_new_field or is_short_trailing_fragment:
                         break
                     addr_parts.append(next_box["text"])
-                fields["address"] = ", ".join(addr_parts).strip(", ")
+                fields["address"] = self._clean_address(", ".join(addr_parts).strip(", "))
 
         # Clean up Names if they accidentally merged with numeric labels (e.g. "3 MR JOHN WILBERT")
         if fields["surname"]:
