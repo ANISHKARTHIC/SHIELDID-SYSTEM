@@ -100,13 +100,13 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 
 ---
 
-## 🚀 Production Deployment (Docker Compose on EC2 t3.medium)
+## 🚀 Production Deployment (Docker Compose on EC2, 2 vCPU / 4GB+ RAM)
 
-**This branch (`high-power`) is the full-power, accurate deployment target — use it for any real deployment.** `db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized for a **t3.medium (2 vCPU / 4GB RAM)**. `ai-service` uses the full `buffalo_l` InsightFace pack at a 640px detector input — the accuracy this project is designed around — and every service gets a comfortable memory budget rather than being squeezed. Verification images go straight to real **S3** — there is no local object-storage container to run or back up.
+**This branch (`high-power`) is the full-power, accurate deployment target — use it for any real deployment.** `db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`, sized for **2 vCPU / 4GB+ RAM** (`t3.medium`, `c7i.large`, `m7i-flex.large`, or similar). `ai-service` uses the full `buffalo_l` InsightFace pack at a 640px detector input — the accuracy this project is designed around — and every service gets a comfortable memory budget rather than being squeezed. Verification images go straight to real **S3** — there is no local object-storage container to run or back up.
 
-Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on.
+Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; on `t3.medium` a 2GB swap file (provisioned by the bootstrap script below) is a backstop for transient spikes, not something the stack is expected to lean on. On a non-burstable type with 4GB+ RAM (`c7i.large`, `m7i-flex.large`) swap matters even less — there's no CPU-credit throttling to work around either, and `ai-service` already fits comfortably in real RAM.
 
-t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, move to a `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+**Instance choice**: `t3.medium` is burstable — CPU credits, not just RAM, are the constraint under sustained load; `ai-service` is pinned to 2 threads (`OMP_NUM_THREADS`/`ORT_NUM_THREADS`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly, or you want consistently fast per-scan inference without worrying about it, move to a non-burstable type instead — **`c7i.large`** (compute-optimized, higher sustained clock speed, best fit for this CPU-bound OCR/face-match workload) or `m7i-flex.large` (more RAM headroom if you'd rather not think about memory at all) both work with this exact `docker-compose.yml` unmodified — same 2 vCPU, same thread pinning, no config changes needed either way.
 
 > **A separate `main` branch exists as a trimmed-down free-tier demo** (`buffalo_s`/320px InsightFace, every service memory-capped to its floor, tuned for a t3.micro's 1GB RAM + swap) — that's a deliberately degraded config for running a demo at zero cost, not something to pull settings from into this branch. Use `high-power` for anything that needs to actually work well.
 
@@ -136,10 +136,10 @@ Verification images are keyed into two prefixes inside the one bucket, not two b
 Because it's a prefix split within one bucket rather than two buckets, a bulk "wipe everything routine" operation is just `aws s3 rm s3://<bucket>/scans/unflagged/ --recursive` — `scans/flagged/` is structurally untouched by that command.
 
 ### 2. Launch the EC2 instance
-- **Type**: `t3.medium`, Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in `buffalo_l` model weights is large).
+- **Type**: `t3.medium`, `c7i.large`, or `m7i-flex.large` (all 2 vCPU / 4GB+ RAM, all validated against this exact `docker-compose.yml`), Amazon Linux 2023 or Ubuntu 22.04+, ≥30GB gp3 root volume (the `ai-service` image with baked-in `buffalo_l` model weights is large).
 - **IAM instance profile**: `venuepass-ec2-profile` from step 1.
 - **Security group**: 22 (SSH, your IP only), 80/443 if fronting with a reverse proxy (recommended, see step 5) or 3000/8000 directly otherwise. Nothing else public — `docker-compose.yml` binds Postgres/Redis/ai-service to `127.0.0.1` so they're unreachable outside the box regardless.
-- **User data**: paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top first). It installs Docker, adds a 2GB swap file, clones the repo, and registers a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
+- **User data**: paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top first). It installs Docker, adds a 2GB swap file, clones the repo, and registers a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`. The swap file is harmless but unnecessary on `c7i.large`/`m7i-flex.large` — feel free to skip that step if launching on one of those instead.
 
 ### 3. Configure secrets
 SSH in and finish the `.env` the bootstrap script generated:
@@ -154,7 +154,7 @@ $EDITOR .env   # set POSTGRES_PASSWORD, S3_BUCKET_NAME=venuepass-verification-im
 ```bash
 docker compose up -d --build
 ```
-First build downloads and bakes in the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency. Expect this to take longer on a t3.medium than on a beefier dev machine; it's a one-time cost per image rebuild.
+First build downloads and bakes in the InsightFace (`buffalo_l`, ~600MB) and EasyOCR (~95MB) model weights during the `ai-service` image build — this makes the initial build slower but means containers start instantly afterward with no runtime internet dependency. Expect this to take longer on any of these instance types than on a beefier dev machine; it's a one-time cost per image rebuild.
 
 ### 5. Verify
 ```bash
@@ -175,7 +175,7 @@ yourdomain.com {
     reverse_proxy /* localhost:3000
 }
 ```
-Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same t3.medium alongside the compose stack.
+Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same instance alongside the compose stack.
 
 ### Notes
 - **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires `scans/unflagged/` objects after 7 days regardless — flagged customers' images (`scans/flagged/`) are exempt from both the cron and the lifecycle rule, by design.
@@ -188,7 +188,7 @@ Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy it
 
 ## ☁️ Alternative: ECS/Fargate + RDS (multi-instance scale-out)
 
-The single-VM t3.medium setup above is the recommended starting point. If verification volume outgrows one instance, `backend` and `ai-service` are two independently deployable, stateless containers (each has its own `Dockerfile`) that fit ECS/Fargate services behind an ALB, with managed AWS services standing in for the containers that only exist for convenience in `docker-compose.yml` (`db` → RDS, `redis` → ElastiCache). S3 setup is identical to step 1 above — the same bucket and IAM policy work for both deployment styles.
+The single-VM setup above is the recommended starting point. If verification volume outgrows one instance, `backend` and `ai-service` are two independently deployable, stateless containers (each has its own `Dockerfile`) that fit ECS/Fargate services behind an ALB, with managed AWS services standing in for the containers that only exist for convenience in `docker-compose.yml` (`db` → RDS, `redis` → ElastiCache). S3 setup is identical to step 1 above — the same bucket and IAM policy work for both deployment styles.
 
 ### 1. S3 (object storage for verification images)
 ```bash
