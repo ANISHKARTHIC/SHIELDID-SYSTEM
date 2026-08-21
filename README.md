@@ -28,12 +28,12 @@ pub-entry/
 │   │   └── main.py         # Entry point for backend orchestrator (Port 8000)
 │   └── venv/               # Backend python environment
 │
-├── frontend/
-│   └── frontend/           # Next.js (React) - Security Gate Dashboard
-│       ├── src/
-│       │   ├── app/        # Next.js pages & app layout (Dashboard, Visitors, Incidents)
-│       │   └── lib/        # State store (Zustand) & API connection utilities
-│       └── package.json
+├── frontend/                # Next.js (React) - Security Gate Dashboard
+│   ├── src/
+│   │   ├── app/             # Next.js pages & app layout (Dashboard, Visitors, Incidents)
+│   │   └── lib/             # State store (Zustand) & API connection utilities
+│   ├── vercel.json          # Vercel deployment config (see "Vercel Deployment" below)
+│   └── package.json
 │
 ├── docker-compose.yml      # Docker services (PostgreSQL & Redis)
 └── pub_entry.db            # SQLite database file (Local development storage)
@@ -77,7 +77,7 @@ If `/ready` reports `ai_service` as an error, ai-service either isn't running or
 ### 4. Next.js Gate Dashboard (`frontend`)
 This client dashboard interfaces with the backend and runs the user interface on port `3000`.
 ```bash
-cd frontend/frontend
+cd frontend
 cp .env.example .env   # if you haven't already — sets NEXT_PUBLIC_API_URL
 npm run dev
 ```
@@ -239,4 +239,15 @@ REDIS_URL=redis://your-cluster.xxxx.cache.amazonaws.com:6379/0
 Put `SECRET_KEY`, `POSTGRES_PASSWORD`/`DATABASE_URL`, and `REDIS_URL` in AWS Secrets Manager or SSM Parameter Store and reference them from the ECS task definition's `secrets` block — do not bake them into the image or set them as plain task-definition environment variables.
 
 ### 5. Frontend
-Deploy the Next.js frontend to its own ECS service (or Amplify/CloudFront+S3 for a purely static export) with `NEXT_PUBLIC_API_URL` set to the backend ALB's public HTTPS URL at **build** time.
+
+#### Vercel (recommended)
+The `frontend/` directory is a standard Next.js app with a `vercel.json` already checked in — Vercel auto-detects the framework, so deploying is:
+1. Import the repo into a new Vercel project.
+2. Set **Root Directory** to `frontend` in the project's Settings (this repo has multiple services at the root, so Vercel needs to know which subdirectory to build).
+3. Add the `NEXT_PUBLIC_API_URL` environment variable (Project Settings → Environment Variables) pointing at the backend's public HTTPS URL — e.g. `https://api.yourdomain.com/api/v1`. This is baked in at **build** time (`src/lib/api.ts`'s `getApiBase()`), so changing it later requires a redeploy, not just a restart.
+4. Push to the connected branch — Vercel builds and deploys automatically from there on.
+
+`next.config.ts`'s `output: "standalone"` (needed for the Docker path below) is automatically skipped on Vercel via its own `VERCEL` environment variable, so no config changes are needed between the two paths.
+
+#### Self-hosted (Docker / ECS)
+Deploy the Next.js frontend to its own ECS service (or Amplify/CloudFront+S3 for a purely static export) using `frontend/Dockerfile`, with `NEXT_PUBLIC_API_URL` set to the backend ALB's public HTTPS URL at **build** time.
