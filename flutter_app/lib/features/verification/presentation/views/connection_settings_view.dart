@@ -102,7 +102,7 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
             controller: _urlController,
             decoration: const InputDecoration(
               labelText: 'API Base URL',
-              hintText: 'http://<server-address>:8000/api/v1',
+              hintText: 'https://venuepass-api.duckdns.org/api/v1',
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.link_rounded),
             ),
