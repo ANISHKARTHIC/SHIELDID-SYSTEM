@@ -46,8 +46,16 @@ class _CameraViewState extends State<CameraView> {
       return;
     }
 
+    // Document scanning always needs the back camera — `cameras.first`
+    // isn't guaranteed to be the back lens on every device/plugin build,
+    // so select it explicitly instead of relying on list ordering.
+    final backCamera = cameras.firstWhere(
+      (c) => c.lensDirection == CameraLensDirection.back,
+      orElse: () => cameras.first,
+    );
+
     _controller = CameraController(
-      cameras.first,
+      backCamera,
       ResolutionPreset.high,
       enableAudio: false,
     );

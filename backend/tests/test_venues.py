@@ -134,6 +134,70 @@ class TestVenuesEndpoints(unittest.TestCase):
         followup = client.get("/api/v1/venues/1/config", headers=auth_headers("testadmin@pub.com"))
         self.assertEqual(followup.json()["occupancy_auto_expire_hours"], 12)
 
+    def _create_second_venue_and_own_venue_admin(self):
+        """Creates Venue 2 and a venue_admin scoped to Venue 1 (the seeded
+        default venue) — used to verify a venue_admin cannot reach another
+        venue's config/policy, mirroring what get_venue/update_venue above
+        already correctly enforce."""
+        other_venue = client.post(
+            "/api/v1/venues",
+            json={"name": "Cross-Venue Target", "address": "2 Elsewhere"},
+            headers=auth_headers("testadmin@pub.com"),
+        ).json()
+
+        client.post(
+            "/api/v1/users",
+            json={
+                "email": "venue1admin@pub.com",
+                "password": "password",
+                "role": "venue_admin",
+            },
+            headers=auth_headers("testadmin@pub.com"),
+        )
+        return other_venue["id"]
+
+    def test_get_venue_config_requires_own_venue(self):
+        # Regression: get_venue_config had no ownership check at all,
+        # unlike the sibling get_venue endpoint just above it in the
+        # router — any venue_admin could read another venue's config.
+        other_venue_id = self._create_second_venue_and_own_venue_admin()
+        response = client.get(
+            f"/api/v1/venues/{other_venue_id}/config",
+            headers=auth_headers("venue1admin@pub.com", "password"),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_venue_policy_requires_own_venue(self):
+        # Regression: update_venue_policy had no ownership check — a
+        # venue_admin at Venue 1 could silently disable another venue's
+        # require_face_match or lower its minimum_age.
+        other_venue_id = self._create_second_venue_and_own_venue_admin()
+        response = client.put(
+            f"/api/v1/venues/{other_venue_id}/policy",
+            json={"require_face_match": False, "minimum_age": 0},
+            headers=auth_headers("venue1admin@pub.com", "password"),
+        )
+        self.assertEqual(response.status_code, 403)
+
+        # The target venue's policy must be unaffected.
+        followup = client.get(
+            f"/api/v1/venues/{other_venue_id}/policy",
+            headers=auth_headers("testadmin@pub.com"),
+        )
+        self.assertTrue(followup.json()["require_face_match"])
+        self.assertEqual(followup.json()["minimum_age"], 18)
+
+    def test_venue_admin_can_still_manage_own_venue_policy(self):
+        # Sanity check: the new ownership guard doesn't break the normal
+        # same-venue path.
+        self._create_second_venue_and_own_venue_admin()
+        response = client.put(
+            "/api/v1/venues/1/policy",
+            json={"minimum_age": 21},
+            headers=auth_headers("venue1admin@pub.com", "password"),
+        )
+        self.assertEqual(response.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

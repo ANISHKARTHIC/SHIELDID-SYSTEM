@@ -98,8 +98,11 @@ class RemoteDataSource {
     return response.data;
   }
 
-  Future<List<dynamic>> getHistory() async {
-    final response = await _dio.get('/sessions/history');
+  Future<List<dynamic>> getHistory({int? limit}) async {
+    final response = await _dio.get(
+      '/sessions/history',
+      queryParameters: limit != null ? {'limit': limit} : null,
+    );
     return response.data as List<dynamic>;
   }
 

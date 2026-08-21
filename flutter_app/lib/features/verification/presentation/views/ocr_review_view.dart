@@ -281,6 +281,19 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                   const SizedBox(height: 40),
                   ElevatedButton(
                     onPressed: () {
+                      if (_surnameController.text.trim().isEmpty ||
+                          _firstNameController.text.trim().isEmpty ||
+                          _dobController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Surname, first name and date of birth are required before continuing.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
                       final ocrData = {
                         'ocr_name':
                             '${_firstNameController.text} ${_surnameController.text}'

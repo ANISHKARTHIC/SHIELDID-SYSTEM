@@ -5,7 +5,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db.session import SessionLocal
-from backend.models.models import Customer, VerificationSession, Blacklist, AuditLog
+from backend.models.models import Customer, VerificationSession, Blacklist, AuditLog, Document
 from backend.services.storage_service import storage_service
 from backend.core.logger import get_logger
 
@@ -74,6 +74,17 @@ def delete_expired_records(trigger: str = "scheduled", db: Optional[Session] = N
                 if session.face_image_path:
                     storage_service.delete_image(session.face_image_path)
                     session.face_image_path = None
+
+            # Document.extracted_data is the full raw OCR dict (name, DOB,
+            # address, licence number, ...) captured at finalize time — it
+            # was never touched by this job, so a "successfully anonymized"
+            # customer's actual name/DOB/licence number stayed retrievable
+            # verbatim by joining Document.customer_id. doc_number carries
+            # the same PII independently of extracted_data, so clear both.
+            documents = db.query(Document).filter(Document.customer_id == customer.id).all()
+            for document in documents:
+                document.extracted_data = None
+                document.doc_number = None
 
             summary["anonymized_count"] += 1
             summary["customer_ids"].append(customer.id)

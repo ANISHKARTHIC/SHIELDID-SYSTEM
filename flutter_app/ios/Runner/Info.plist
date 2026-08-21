@@ -77,6 +77,8 @@
 		<string>This app needs access to the photo library to upload ID documents for verification.</string>
 		<key>NSFaceIDUsageDescription</key>
 		<string>Face ID is used to quickly and securely unlock the app for signed-in staff.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>VenuePass connects to your venue's local verification server over your Wi-Fi network.</string>
 		<key>UIStatusBarHidden</key>
 		<false/>
 	</dict>

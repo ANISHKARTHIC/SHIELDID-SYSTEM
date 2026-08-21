@@ -45,6 +45,11 @@ class TestSessionEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["operator_name"], "testoperator")
+        # Regression: the mobile dashboard shows the operator's venue name
+        # (Profile > seeded as "Test Pub" in conftest.init_test_db) rather
+        # than a static "Door team verification" subtitle — this field
+        # must be present and correctly scoped to the caller's own venue.
+        self.assertEqual(data["venue_name"], "Test Pub")
         self.assertIn("verified", data)
         self.assertIn("pending", data)
         self.assertIn("flagged", data)
@@ -58,7 +63,10 @@ class TestSessionEndpoints(unittest.TestCase):
         # (a real local Redis if available, else the in-memory fallback)
         from backend.db.redis import get_redis
         session_state = {
-            "step": 3,
+            # step 4 = face-verify step completed, matching what the real
+            # /session/{id}/face endpoint sets — finalize_session requires
+            # this before honoring a "pass" decision.
+            "step": 4,
             "status": "ready",
             "session_id": session_id,
             "ocr": {

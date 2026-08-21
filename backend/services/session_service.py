@@ -30,6 +30,23 @@ class SessionService:
         db.refresh(session)
         return session
 
+    def assert_session_venue(self, db: Session, session_id: str, venue_id: int) -> VerificationSession:
+        """
+        Raises ValueError if session_id doesn't exist or belongs to a
+        different venue than venue_id. Must be called at the start of every
+        session-scoped endpoint (classify/ocr/face/finalize) — without it,
+        an authenticated operator at one venue can act on any other venue's
+        in-progress session just by knowing/guessing its UUID, since the
+        router's only auth dependency checks that *some* user is logged in,
+        not that they own this particular session.
+        """
+        session = db.query(VerificationSession).filter(VerificationSession.id == session_id).first()
+        if not session:
+            raise ValueError("Session not found")
+        if session.venue_id != venue_id:
+            raise ValueError("Session not found")
+        return session
+
     def transition_state(self, db: Session, session_id: str, new_state: SessionStateEnum, operator_id: int = None, device_info: str = None) -> VerificationSession:
         session = db.query(VerificationSession).filter(VerificationSession.id == session_id).first()
         if not session:

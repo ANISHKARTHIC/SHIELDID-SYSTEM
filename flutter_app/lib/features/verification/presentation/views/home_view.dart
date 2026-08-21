@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../../data/datasources/remote_data_source.dart';
 import 'camera_view.dart';
 import 'occupancy_view.dart';
 import 'package:dio/dio.dart';
-import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/navigation/app_page_route.dart';
 import '../../../../core/widgets/app_snackbar.dart';
@@ -13,7 +13,13 @@ import '../../../../core/widgets/app_snackbar.dart';
 class HomeView extends ConsumerStatefulWidget {
   final bool loadInitialData;
 
-  const HomeView({super.key, this.loadInitialData = true});
+  /// Switches the bottom nav to the Profile tab, where server/AI-service
+  /// connection status and configuration now live — the dashboard itself
+  /// no longer shows or manages that technical state (see profile_view.dart's
+  /// Connection section).
+  final VoidCallback? onOpenSettings;
+
+  const HomeView({super.key, this.loadInitialData = true, this.onOpenSettings});
 
   @override
   ConsumerState<HomeView> createState() => _HomeViewState();
@@ -21,20 +27,17 @@ class HomeView extends ConsumerStatefulWidget {
 
 class _HomeViewState extends ConsumerState<HomeView> {
   bool _isLoading = false;
-  bool _isConnecting = false;
-  bool _isConnected = false;
-  String? _errorMessage;
   Map<String, dynamic>? _stats;
-  Map<String, dynamic>? _readiness;
   Map<String, dynamic>? _occupancy;
+  List<dynamic>? _recentActivity;
 
   @override
   void initState() {
     super.initState();
     if (widget.loadInitialData) {
       _fetchStats();
-      _fetchReadiness();
       _fetchOccupancy();
+      _fetchRecentActivity();
     }
   }
 
@@ -48,163 +51,28 @@ class _HomeViewState extends ConsumerState<HomeView> {
     }
   }
 
-  Future<void> _fetchReadiness() async {
-    try {
-      final remoteData = RemoteDataSource();
-      final readiness = await remoteData.getReadiness();
-      if (mounted) setState(() => _readiness = readiness);
-    } catch (e) {
-      if (mounted) setState(() => _readiness = null);
-    }
-  }
-
-  void _showSettingsDialog() {
-    final controller = TextEditingController(
-      text: DioClient().dio.options.baseUrl,
-    );
-    bool isTesting = false;
-    String? testResult;
-    bool? testSuccess;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final colors = context.colors;
-            return AlertDialog(
-              backgroundColor: colors.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: Row(
-                children: [
-                  Icon(Icons.dns_rounded, color: colors.primary),
-                  const SizedBox(width: 10),
-                  const Text('Server Configuration'),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Enter the backend server address for this venue:',
-                      style: TextStyle(color: colors.muted, fontSize: 13),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: controller,
-                      decoration: const InputDecoration(
-                        labelText: 'API Base URL',
-                        hintText: 'http://<server-address>:8000/api/v1',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.link_rounded),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: isTesting
-                          ? null
-                          : () async {
-                              final url = controller.text.trim();
-                              if (url.isEmpty) return;
-                              setDialogState(() {
-                                isTesting = true;
-                                testResult = 'Testing connection...';
-                                testSuccess = null;
-                              });
-                              final ok = await DioClient().testConnection(url);
-                              setDialogState(() {
-                                isTesting = false;
-                                testSuccess = ok;
-                                testResult = ok
-                                    ? 'Connected successfully!'
-                                    : 'Failed to connect. Ensure backend is running.';
-                              });
-                            },
-                      icon: isTesting
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.network_check_rounded),
-                      label: const Text('Test Connection'),
-                    ),
-                    if (testResult != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        testResult!,
-                        style: TextStyle(
-                          color: testSuccess == true
-                              ? colors.success
-                              : colors.danger,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final url = controller.text.trim();
-                    if (url.isNotEmpty) {
-                      await DioClient().updateBaseUrl(url);
-                      if (!dialogContext.mounted) return;
-                      Navigator.pop(dialogContext);
-                      if (mounted) {
-                        showAppSuccessSnackBar(
-                          this.context,
-                          'Server address updated',
-                        );
-                        _fetchStats();
-                      }
-                    }
-                  },
-                  child: const Text('Save & Apply'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   Future<void> _fetchStats() async {
-    setState(() {
-      _isConnecting = true;
-      _errorMessage = null;
-    });
     try {
       final remoteData = RemoteDataSource();
       final stats = await remoteData.getStats();
-      if (mounted) {
-        setState(() {
-          _stats = stats;
-          _isConnected = true;
-          _isConnecting = false;
-          _errorMessage = null;
-        });
-      }
+      if (mounted) setState(() => _stats = stats);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isConnected = false;
-          _isConnecting = false;
-          _errorMessage = 'Unable to reach the verification service.';
-        });
-      }
+      if (mounted) setState(() => _stats = null);
     }
+  }
+
+  Future<void> _fetchRecentActivity() async {
+    try {
+      final remoteData = RemoteDataSource();
+      final history = await remoteData.getHistory(limit: 5);
+      if (mounted) setState(() => _recentActivity = history);
+    } catch (e) {
+      if (mounted) setState(() => _recentActivity = null);
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_fetchStats(), _fetchOccupancy(), _fetchRecentActivity()]);
   }
 
   Future<void> _startVerification() async {
@@ -217,9 +85,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
         Navigator.of(
           context,
         ).push(AppPageRoute.push(CameraView(sessionId: sessionId))).then((_) {
-          _fetchStats(); // Refresh stats when returning
-          _fetchReadiness();
-          _fetchOccupancy();
+          _refreshAll();
         });
       }
     } on DioException catch (e) {
@@ -233,11 +99,13 @@ class _HomeViewState extends ConsumerState<HomeView> {
             content: Text(errorMsg),
             backgroundColor: context.colors.dangerSoft,
             behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Configure',
-              textColor: context.colors.primary,
-              onPressed: _showSettingsDialog,
-            ),
+            action: widget.onOpenSettings != null
+                ? SnackBarAction(
+                    label: 'Configure',
+                    textColor: context.colors.primary,
+                    onPressed: widget.onOpenSettings!,
+                  )
+                : null,
           ),
         );
       }
@@ -255,86 +123,31 @@ class _HomeViewState extends ConsumerState<HomeView> {
 
   Widget _buildDashboard() {
     final colors = context.colors;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (!_isConnected && _errorMessage != null) ...[
-            Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: colors.danger.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: colors.danger.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.cloud_off_rounded, color: colors.danger),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Backend Offline / Unreachable',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: colors.danger,
-                            fontSize: 13,
-                          ),
-                        ),
-                        Text(
-                          _errorMessage!,
-                          style: TextStyle(color: colors.muted, fontSize: 11),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _showSettingsDialog,
-                    child: const Text('Fix'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          GestureDetector(
-            onLongPress: _showSettingsDialog,
-            child: AppSurface(
+    return RefreshIndicator(
+      onRefresh: _refreshAll,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppSurface(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'ACTIVE SHIFT',
-                        style: TextStyle(
-                          color: colors.muted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.06,
-                        ),
-                      ),
-                      StatusPill(
-                        label: _isConnecting
-                            ? 'CHECKING'
-                            : (_isConnected ? 'ONLINE' : 'OFFLINE'),
-                        color: _isConnecting
-                            ? colors.warning
-                            : (_isConnected ? colors.success : colors.danger),
-                      ),
-                    ],
+                  Text(
+                    'ACTIVE SHIFT',
+                    style: TextStyle(
+                      color: colors.muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.06,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    _stats?["operator_name"] ??
-                        (_isConnecting ? "Connecting..." : "Door Staff"),
+                    _stats?["operator_name"] ?? "Door Staff",
                     style: TextStyle(
                       color: colors.ink,
                       fontSize: 26,
@@ -344,9 +157,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _isConnected
-                        ? 'Connected to verification service.'
-                        : 'Not connected. Long-press to configure.',
+                    DateFormat('EEEE, MMMM d').format(DateTime.now()),
                     style: TextStyle(
                       color: colors.muted,
                       fontSize: 13,
@@ -356,141 +167,167 @@ class _HomeViewState extends ConsumerState<HomeView> {
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          _buildOccupancyCard(colors),
-          const SizedBox(height: 16),
-          AppSurface(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
-            child: Row(
-              children: [
-                _buildStatColumn(
-                  colors,
-                  'Verified',
-                  _stats != null ? _stats!["verified"].toString() : '-',
-                  colors.ink,
-                  isFirst: true,
-                ),
-                _buildStatColumn(
-                  colors,
-                  'Pending',
-                  _stats != null ? _stats!["pending"].toString() : '-',
-                  colors.ink,
-                ),
-                _buildStatColumn(
-                  colors,
-                  'Flagged',
-                  _stats != null ? _stats!["flagged"].toString() : '-',
-                  colors.warning,
-                  isLast: true,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          AppSurface(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            child: Column(
-              children: [
-                _buildStatusRow(
-                  colors,
-                  Icons.wifi_rounded,
-                  'Network',
-                  _isConnected ? 'Connected' : 'Offline',
-                  _isConnected ? colors.success : colors.danger,
-                ),
-                Divider(color: colors.line, height: 1),
-                _buildStatusRow(
-                  colors,
-                  Icons.memory_rounded,
-                  'AI Service',
-                  _readiness?['checks']?['ai_service'] == 'ok'
-                      ? 'Ready'
-                      : 'Unavailable',
-                  _readiness?['checks']?['ai_service'] == 'ok'
-                      ? colors.success
-                      : colors.muted,
-                ),
-                Divider(color: colors.line, height: 1),
-                _buildStatusRow(
-                  colors,
-                  Icons.sync_rounded,
-                  'Sync',
-                  _isConnected ? 'Up to date' : 'Pending',
-                  colors.ink,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          ElevatedButton(
-            onPressed: _isLoading ? null : _startVerification,
-            child: _isLoading
-                ? SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      color: colors.onPrimary,
-                      strokeWidth: 3,
-                    ),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.document_scanner_rounded,
-                        color: colors.onPrimary,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Start Verification',
-                        style: TextStyle(color: colors.onPrimary),
-                      ),
-                    ],
+            const SizedBox(height: 16),
+            _buildOccupancyCard(colors),
+            const SizedBox(height: 16),
+            AppSurface(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
+              child: Row(
+                children: [
+                  _buildStatColumn(
+                    colors,
+                    'Verified',
+                    _stats != null ? _stats!["verified"].toString() : '-',
+                    colors.ink,
+                    isFirst: true,
                   ),
+                  _buildStatColumn(
+                    colors,
+                    'Pending',
+                    _stats != null ? _stats!["pending"].toString() : '-',
+                    colors.ink,
+                  ),
+                  _buildStatColumn(
+                    colors,
+                    'Flagged',
+                    _stats != null ? _stats!["flagged"].toString() : '-',
+                    colors.warning,
+                    isLast: true,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _startVerification,
+              child: _isLoading
+                  ? SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(
+                        color: colors.onPrimary,
+                        strokeWidth: 3,
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.document_scanner_rounded,
+                          color: colors.onPrimary,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Start Verification',
+                          style: TextStyle(color: colors.onPrimary),
+                        ),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 28),
+            _buildRecentActivity(colors),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentActivity(AppColorsExt colors) {
+    if (_recentActivity == null || _recentActivity!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'RECENT ACTIVITY',
+          style: TextStyle(
+            color: colors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.06,
+          ),
+        ),
+        const SizedBox(height: 10),
+        AppSurface(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Column(
+            children: [
+              for (int i = 0; i < _recentActivity!.length; i++) ...[
+                if (i > 0) Divider(color: colors.line, height: 1),
+                _buildActivityRow(colors, _recentActivity![i]),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityRow(AppColorsExt colors, dynamic item) {
+    final decision = (item['final_decision'] ?? 'pending').toString();
+    final statusColor = _statusColor(decision, colors);
+    final statusIcon = _statusIcon(decision);
+    final date = DateTime.tryParse(item['created_at'] ?? '');
+    final formattedTime = date != null ? DateFormat('HH:mm').format(date) : '—';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Icon(statusIcon, color: statusColor, size: 16),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              decision.toUpperCase(),
+              style: TextStyle(
+                color: colors.ink,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            formattedTime,
+            style: TextStyle(
+              color: colors.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatusRow(
-    AppColorsExt colors,
-    IconData icon,
-    String label,
-    String value,
-    Color valueColor,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 15, color: colors.muted),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  color: colors.muted,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
+  Color _statusColor(String decision, AppColorsExt colors) {
+    switch (decision) {
+      case 'pass':
+        return colors.success;
+      case 'check':
+        return colors.warning;
+      case 'deny':
+      case 'block':
+      case 'blocked':
+        return colors.danger;
+      default:
+        return colors.muted;
+    }
+  }
+
+  IconData _statusIcon(String decision) {
+    switch (decision) {
+      case 'pass':
+        return Icons.check_rounded;
+      case 'check':
+        return Icons.help_outline_rounded;
+      case 'deny':
+      case 'block':
+      case 'blocked':
+        return Icons.block_rounded;
+      default:
+        return Icons.schedule_rounded;
+    }
   }
 
   Widget _buildOccupancyCard(AppColorsExt colors) {
@@ -628,15 +465,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
   Widget build(BuildContext context) {
     return AppPage(
       title: 'Security Portal',
-      subtitle: 'Door team verification',
+      subtitle: _stats?["venue_name"] as String? ?? 'Door team verification',
       actions: [
         IconButton(
-          tooltip: 'Refresh Status',
+          tooltip: 'Refresh',
           icon: const Icon(Icons.sync_rounded),
-          onPressed: () {
-            _fetchStats();
-            _fetchReadiness();
-          },
+          onPressed: _refreshAll,
         ),
       ],
       child: _buildDashboard(),

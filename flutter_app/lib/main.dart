@@ -193,8 +193,15 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
+  static const int _profileTabIndex = 4;
+
+  void _goToProfileTab() => setState(() => _currentIndex = _profileTabIndex);
+
   late final List<Widget> _screens = [
-    HomeView(loadInitialData: widget.loadInitialData),
+    HomeView(
+      loadInitialData: widget.loadInitialData,
+      onOpenSettings: _goToProfileTab,
+    ),
     const HistoryView(),
     const OccupancyView(),
     const NotificationsView(),

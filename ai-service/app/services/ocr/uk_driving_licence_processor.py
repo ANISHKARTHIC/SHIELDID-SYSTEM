@@ -126,12 +126,18 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             p3 = num_clean[11:13].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
             # Char 14 is always a digit per the DVLA formula (unlike chars
             # 15-16, which are genuinely mixed letters/numbers) — apply the
-            # same letter->digit correction as the DOB block (p2). Confirmed
-            # real failure mode: a printed "9" here OCR'd as "I" (visually
-            # similar in the DVLA card font), silently corrupting the
-            # licence number since this position previously passed through
-            # with zero correction.
-            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6")
+            # same letter->digit correction as the DOB block (p2), with one
+            # difference: "G" resolves to "9" here, not "6". Confirmed real
+            # failure modes for this position: a printed "9" OCR'd as "I"
+            # (visually similar in the DVLA card font — fixed by the O/I/S/
+            # Z/B map below), or as a lowercase "g" that .upper() above
+            # turns into "G" (the same 9<->g visual confusion already
+            # handled in _clean_address for house codes, e.g. "H89D" ->
+            # "H8gD"). Since this position's DVLA-documented expected value
+            # is "typically 9" (not 6), a G-shaped misread here should
+            # resolve to 9 rather than the generic G->6 digit-block mapping
+            # used elsewhere (e.g. p2's DOB block, where 6 is a real digit).
+            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "9")
             p5 = num_clean[14:16] # Check chars — genuinely mixed, left as-is
             num_clean = p1 + p2 + p3 + p4 + p5
             

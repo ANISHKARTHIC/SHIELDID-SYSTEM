@@ -56,7 +56,12 @@ class PolicySchema(Base):
     id = Column(Integer, primary_key=True, index=True)
     venue_id = Column(Integer, ForeignKey("venues.id"), unique=True)
     minimum_age = Column(Integer, default=18)
-    require_face_match = Column(Boolean, default=False)
+    # Defaults True: a freshly provisioned venue whose policy row is
+    # auto-created (venue_service.get_venue_policy) must not silently skip
+    # face-match enforcement in the decision logic in v1_router.face_match —
+    # that would let a session PASS on OCR/age/blacklist alone with no
+    # check that the captured face matches the ID photo.
+    require_face_match = Column(Boolean, default=True)
     face_similarity_threshold = Column(Float, default=0.75)
     ocr_confidence_threshold = Column(Float, default=0.85)
     quality_threshold = Column(Float, default=0.7)
@@ -189,6 +194,25 @@ class Occupancy(Base):
     checked_out_by = relationship("User")
 
 Index('ix_occupancy_venue_open', Occupancy.venue_id, Occupancy.exited_at)
+
+# Partial unique index: a customer can only have one OPEN (exited_at IS
+# NULL) occupancy row per venue at a time. Without this, two concurrent
+# finalize_session calls for the same customer at the same venue (e.g. a
+# duplicate submit, or two operator devices scanning the same person in
+# quick succession) can each independently pass the "not already inside"
+# check-less insert and create two simultaneous open rows — inflating the
+# live occupancy count, and a single checkout only closes one of the two
+# (occupancy_service.check_out_by_customer uses .first()), permanently
+# leaking a phantom occupant. A customer being inside two *different*
+# venues at once is legitimate and must remain allowed, so this is scoped
+# per (venue_id, customer_id), not per customer_id alone.
+Index(
+    'uq_occupancy_open_per_venue_customer',
+    Occupancy.venue_id,
+    Occupancy.customer_id,
+    unique=True,
+    postgresql_where=(Occupancy.exited_at.is_(None)),
+)
 
 class SupervisorNote(Base):
     __tablename__ = "supervisor_notes"

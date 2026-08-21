@@ -65,7 +65,7 @@ def manual_checkout(
     db: Session = Depends(get_db),
 ):
     try:
-        record = occupancy_service.check_out(db, occupancy_id, current_user.id)
+        record = occupancy_service.check_out(db, occupancy_id, current_user.id, current_user.venue_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not record:

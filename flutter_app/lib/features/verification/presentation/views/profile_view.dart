@@ -8,6 +8,8 @@ import '../../../../core/providers/theme_mode_provider.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/widgets/app_snackbar.dart';
+import '../../../../core/navigation/app_page_route.dart';
+import 'connection_settings_view.dart';
 
 class ProfileView extends ConsumerStatefulWidget {
   final VoidCallback onLoggedOut;
@@ -139,6 +141,57 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
             ],
           ),
           const SizedBox(height: 28),
+          Divider(color: colors.line, height: 1),
+          const SizedBox(height: 22),
+          Text(
+            'CONNECTION',
+            style: AppTypography.caption.copyWith(
+              color: colors.muted,
+              letterSpacing: 0.06,
+            ),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(
+                context,
+              ).push(AppPageRoute.push(const ConnectionSettingsView()));
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(
+                children: [
+                  Icon(Icons.dns_rounded, size: 18, color: colors.ink),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Server & Service Status',
+                          style: AppTypography.callout.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: colors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Configure the backend address and check connectivity',
+                          style: AppTypography.footnote.copyWith(
+                            color: colors.muted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: colors.muted, size: 20),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
           Divider(color: colors.line, height: 1),
           const SizedBox(height: 22),
           Text(

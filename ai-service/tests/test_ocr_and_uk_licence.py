@@ -191,6 +191,24 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertTrue(res["valid"], res["errors"])
         self.assertEqual(res["sanitized_num"][13], "1")  # I -> 1, not left as I
 
+    def test_check_digit_position_14_g_resolves_to_9_not_6(self):
+        # Regression: position 14's expected value is "typically 9" per the
+        # DVLA formula, and a lowercase "g" OCR misread of "9" is a
+        # confirmed real failure mode elsewhere in this file (see
+        # _clean_address's "H89D" -> "H8gD" case). validate_licence_number
+        # upper()s the whole string before this correction runs, so that
+        # "g" arrives here as "G" — which must resolve to "9" for this
+        # position, not to "6" (the generic G->6 mapping used in the DOB
+        # block, p2, where 6 is a real expected digit).
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GPGTF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["sanitized_num"][13], "9")  # G -> 9, not 6
+
     def test_clean_address_fixes_house_code_letter_digit_confusion(self):
         # Regression: found on a real card — "H89D" (house identifier)
         # OCR'd as "H8gD", 'g' standing in for '9'.
