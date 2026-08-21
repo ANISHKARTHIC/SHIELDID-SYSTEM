@@ -13,6 +13,9 @@ from backend.schemas.schemas import BlacklistCreate, IncidentCreate, Verificatio
 from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
 from backend.core.config import settings
+from backend.core.logger import get_logger
+
+logger = get_logger("ocr_extraction")
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
 
@@ -147,14 +150,36 @@ async def extract_ocr(
             session_data["validation"] = result["validation"]
             session_data["step"] = 3
             redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
-            
+
+            # Log exactly what was extracted vs. how confident/valid it was,
+            # per-field — this is the primary tool for diagnosing bad
+            # extractions (wrong surname, mismatched DOB, etc.) after the
+            # fact: grep the backend log for the session_id to see the full
+            # field/confidence/validation picture ai-service returned,
+            # without needing to reproduce the scan.
+            extracted = result.get("extracted_data", {})
+            fields = extracted.get("fields", extracted)
+            confidences = extracted.get("confidences", {})
+            validation = result.get("validation", {})
+            logger.info(
+                "OCR extraction session=%s doc_type=%s fields=%s confidences=%s "
+                "avg_confidence=%s valid=%s errors=%s",
+                session_id,
+                document_type,
+                json.dumps(fields, default=str),
+                json.dumps(confidences, default=str),
+                extracted.get("confidence"),
+                validation.get("is_valid"),
+                validation.get("errors"),
+            )
+
             # Update state
             try:
                 session_service.update_session_data(db, session_id, {"ocr_data": result["extracted_data"]})
                 session_service.transition_state(db, session_id, SessionStateEnum.OCR_COMPLETED)
             except ValueError as e:
                 pass # Ignoring errors for now
-            
+
             return result
         elif response.status_code == 422:
             raise HTTPException(status_code=422, detail=response.json().get("message", "No legible text could be extracted from the document."))

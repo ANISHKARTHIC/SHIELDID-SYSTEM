@@ -13,6 +13,18 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertEqual(self.processor.parse_date("1995-12-19"), "1995-12-19")
         self.assertEqual(self.processor.parse_date("invalid"), "")
 
+    def test_parse_date_handles_ocr_dropped_periods(self):
+        # Regression: EasyOCR frequently drops small punctuation like the
+        # periods in a UK licence's compact date fields. The old cleaning
+        # step stripped whitespace entirely (not just non-date chars),
+        # which glued "15 06 2020" into "15062020" — a shape no date
+        # pattern matched, silently leaving the field empty.
+        self.assertEqual(self.processor.parse_date("15 06 2020"), "2020-06-15")
+        self.assertEqual(self.processor.parse_date("15  06  2020"), "2020-06-15")
+        # Every separator dropped, including spaces — falls back to DD MM
+        # YYYY interpretation of the glued digit run.
+        self.assertEqual(self.processor.parse_date("15062020"), "2020-06-15")
+
     def test_parse_uk_driver_number_male(self):
         # SMITH901018AB9IJ
         # Surname: SMITH
@@ -81,6 +93,68 @@ class TestOCRAndUKLicence(unittest.TestCase):
         ]
         result = self.processor.process(ocr_results)
         self.assertEqual(result["fields"]["licence_number"], "SMITH901010JO9IJ")
+
+    def test_issuing_authority_extracted_from_standalone_4c_line(self):
+        # Regression: real DVLA cards print 4a/4b/4c as three separate
+        # lines, not merged into one OCR box. issuing_authority used to be
+        # populated only via a nested check inside the 4A branch, so it
+        # silently stayed empty for this — the normal — case, since there
+        # was no standalone "elif 4C" branch at all.
+        ocr_results = [
+            self._box("1. SMITH", y=80),
+            self._box("2. JOHN MICHAEL", y=110),
+            self._box("3. 01.01.1990 UK", y=140),
+            self._box("4a. 15.06.2020", y=170),
+            self._box("4b. 14.06.2030", y=200),
+            self._box("4c. DVLA", y=230),
+            self._box("5. SMITH901010JM9IJ", y=260),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+        self.assertEqual(fields["date_of_expiry"], "2030-06-14")
+
+    def test_issuing_authority_extracted_from_merged_4a_4c_line(self):
+        # The original merged-box code path (4a and 4c OCR'd onto the same
+        # line) must keep working alongside the new standalone-4C branch.
+        ocr_results = [
+            self._box("1. SMITH", y=80),
+            self._box("2. JOHN", y=110),
+            self._box("3. 01.01.1990", y=140),
+            self._box("4a. 15.06.2020 4c. DVLA", y=170),
+            self._box("4b. 14.06.2030", y=200),
+            self._box("5. SMITH901010JO9IJ", y=230),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+
+    def test_full_extraction_survives_ocr_dropped_periods(self):
+        # Regression: realistic noisy OCR output with periods dropped from
+        # every field (common — periods are small and easily missed by the
+        # text detector, especially at lower resolution/blur). Before the
+        # date-regex fix, date_of_issue/date_of_expiry silently stayed
+        # empty and place_of_birth incorrectly retained the full "01 01
+        # 1990 UK" string instead of extracting just "UK".
+        ocr_results = [
+            self._box("1 SMITH", y=80),
+            self._box("2 JOHN MICHAEL", y=110),
+            self._box("3 01 01 1990 UK", y=140),
+            self._box("4a 15 06 2020", y=170),
+            self._box("4b 14 06 2030", y=200),
+            self._box("4c DVLA", y=230),
+            self._box("5 SMITH901010JM9IJ", y=260),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["date_of_birth"], "1990-01-01")
+        self.assertEqual(fields["place_of_birth"], "UK")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+        self.assertEqual(fields["date_of_expiry"], "2030-06-14")
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertTrue(result["validation"]["is_valid"])
 
 if __name__ == "__main__":
     unittest.main()

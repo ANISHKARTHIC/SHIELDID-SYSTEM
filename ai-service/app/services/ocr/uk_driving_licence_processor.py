@@ -2,38 +2,64 @@ import re
 from datetime import datetime
 from .base_processor import BaseDocumentProcessor
 
+# Matches a DD-MM-YYYY-shaped date with . / - or one-or-more spaces as the
+# separator between groups — EasyOCR frequently drops small punctuation
+# like periods on a UK licence's compact date fields, turning "15.06.2020"
+# into "15 06 2020" or worse, so a separator-strict regex silently misses
+# these and leaves date_of_issue/date_of_expiry empty.
+DATE_PATTERN = re.compile(r'\b\d{2}[-/.\s]+\d{2}[-/.\s]+\d{4}\b')
+
 class UKDrivingLicenceProcessor(BaseDocumentProcessor):
     """
     Dedicated processor for UK Driving Licences.
     Extracts DVLA licence fields with spatial and regex validation rules.
     """
-    
+
     def parse_date(self, date_str: str) -> str:
         """
         Helper to extract and format date into YYYY-MM-DD.
-        Supports DD.MM.YYYY, DD/MM/YYYY, YYYY-MM-DD formats.
+        Supports DD.MM.YYYY, DD/MM/YYYY, DD MM YYYY, YYYY-MM-DD formats.
         """
         if not date_str:
             return ""
-        # Clean any OCR noise
-        cleaned = re.sub(r'[^\d\-/\.]', '', date_str).strip()
-        
-        # Matches
-        m1 = re.search(r'\b(\d{2})[-/.](\d{2})[-/.](\d{4})\b', cleaned)
+        # Clean any OCR noise, but keep whitespace as a separator candidate
+        # — EasyOCR frequently drops small punctuation like periods on a
+        # UK licence's compact date fields (e.g. "15.06.2020" -> "15 06
+        # 2020" or even "15062020" if the space is dropped too), and
+        # previously this strip discarded whitespace entirely, gluing the
+        # digit groups together into something no date pattern below could
+        # match — silently leaving date_of_issue/date_of_expiry empty.
+        cleaned = re.sub(r'[^\d\-/\.\s]', '', date_str).strip()
+
+        # Matches (day-month-year, common on UK licences), separator is
+        # one of . / - or one-or-more spaces.
+        m1 = re.search(r'\b(\d{2})[-/.\s]+(\d{2})[-/.\s]+(\d{4})\b', cleaned)
         if m1:
             d, m, y = m1.groups()
             try:
                 return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
             except ValueError:
                 pass
-        
-        m2 = re.search(r'\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b', cleaned)
+
+        m2 = re.search(r'\b(\d{4})[-/.\s]+(\d{2})[-/.\s]+(\d{2})\b', cleaned)
         if m2:
             y, m, d = m2.groups()
             try:
                 return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
             except ValueError:
                 pass
+
+        # Fully glued 8-digit run with no separator at all (e.g. every
+        # separator character, including spaces, got dropped by OCR) —
+        # DD MM YYYY is the UK licence convention, so try that ordering.
+        m3 = re.search(r'\b(\d{2})(\d{2})(\d{4})\b', cleaned)
+        if m3:
+            d, m, y = m3.groups()
+            try:
+                return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
         return ""
 
     def validate_licence_number(self, num: str, surname: str, dob: str, first_names: str) -> dict:
@@ -224,7 +250,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     confidences["date_of_birth"] = box["conf"]
                     confidences["place_of_birth"] = box["conf"]
                 
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     dob_raw = date_match.group(0)
                     fields["date_of_birth"] = self.parse_date(dob_raw)
@@ -232,7 +258,10 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 else:
                     fields["place_of_birth"] = val
                     
-            # Field 4a & 4c: Issue Date & Issuing Authority
+            # Field 4a: Issue Date (and inline 4c if merged onto the same
+            # OCR box/line — real DVLA cards usually print 4a/4b/4c as
+            # separate lines, handled by the standalone 4C branch below,
+            # but some crops/fonts get merged into one EasyOCR box).
             elif "4A" in t or re.match(r'^4[\s]*A', t):
                 val = re.sub(r'^.*?4[\s]*A[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
@@ -240,17 +269,17 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     confidences["date_of_issue"] = boxes[i+1]["conf"]
                 else:
                     confidences["date_of_issue"] = box["conf"]
-                    
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     fields["date_of_issue"] = self.parse_date(date_match.group(0))
-                
+
                 if "4C" in t or re.search(r'4[\s]*C', t):
                     c_parts = re.split(r'4[\s]*C', t)
                     if len(c_parts) > 1:
                         fields["issuing_authority"] = re.sub(r'^[\W_]+', '', c_parts[1]).strip()
                         confidences["issuing_authority"] = box["conf"]
-                        
+
             # Field 4b: Expiry Date
             elif "4B" in t or re.match(r'^4[\s]*B', t):
                 val = re.sub(r'^.*?4[\s]*B[\W_]*', '', t).strip()
@@ -260,10 +289,25 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 else:
                     confidences["date_of_expiry"] = box["conf"]
                     
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     fields["date_of_expiry"] = self.parse_date(date_match.group(0))
-                    
+
+            # Field 4c: Issuing Authority, printed as its own line on real
+            # DVLA cards (the vast majority of scans hit this branch, not
+            # the inline-merged case in the 4A branch above — that path was
+            # previously the *only* way issuing_authority got populated,
+            # which meant it silently stayed empty whenever 4a/4c were
+            # separate OCR boxes, the normal case).
+            elif "4C" in t or re.match(r'^4[\s]*C', t):
+                val = re.sub(r'^.*?4[\s]*C[\W_]*', '', t).strip()
+                if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
+                    val = boxes[i+1]["text"]
+                    confidences["issuing_authority"] = boxes[i+1]["conf"]
+                else:
+                    confidences["issuing_authority"] = box["conf"]
+                fields["issuing_authority"] = val
+
             # Field 5: Licence Number
             elif re.match(r'^5[\W_]*[A-Z]', t) or t.startswith("5.") or t == "5":
                 val = re.sub(r'^5[\W_]*', '', t).strip()
@@ -363,7 +407,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
 
         if not fields["date_of_birth"]:
             # If DOB label failed, parse earliest date found in the file
-            date_regex = re.compile(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b')
+            date_regex = DATE_PATTERN
             found_dates = []
             for box in boxes:
                 for match in date_regex.finditer(box["text"]):

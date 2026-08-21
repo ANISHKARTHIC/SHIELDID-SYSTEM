@@ -6,6 +6,15 @@ import re
 import json
 import numpy as np
 
+# Python's root logger defaults to WARNING, which would silently drop every
+# logger.info() call throughout this service (including the raw-OCR-lines
+# and parsed-fields logging used to diagnose extraction accuracy) — set it
+# to INFO explicitly so those actually reach uvicorn's stdout output.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
 from contextlib import asynccontextmanager
 from app.core.model_registry import model_registry
 
