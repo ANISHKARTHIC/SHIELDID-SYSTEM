@@ -179,6 +179,14 @@ async def face_match(
         raise HTTPException(status_code=404, detail="Session not found")
     session_data = json.loads(session_data_str)
 
+    if session_data.get("step", 0) < 3:
+        # ocr further down reads session_data["ocr"], which only exists
+        # once /ocr has run — without this guard, calling /face out of
+        # order raised a raw KeyError that surfaced as an opaque 500
+        # instead of a clear, client-recoverable 400 like /ocr's own
+        # step-order check.
+        raise HTTPException(status_code=400, detail="OCR must be completed first")
+
     file_bytes = await file.read()
 
     # Save face to S3, under normal/ — blacklist status is resolved further
