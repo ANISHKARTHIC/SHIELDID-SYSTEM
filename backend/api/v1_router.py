@@ -17,16 +17,12 @@ from backend.core.config import settings
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
 
 def get_ai_service_url() -> str:
-    import os
-    env_url = os.getenv("AI_SERVICE_URL")
-    if env_url and "localhost" not in env_url:
-        return env_url
-    if os.getenv("POSTGRES_SERVER") == "db":
-        return "http://ai-service:8001"
-    url = settings.AI_SERVICE_URL
-    if "localhost" in url:
-        url = url.replace("localhost", "ai-service")
-    return url
+    # settings.AI_SERVICE_URL already resolves the right value for both
+    # cases: it defaults to http://localhost:8001 for local dev, and
+    # docker-compose.yml sets the AI_SERVICE_URL env var explicitly to
+    # http://ai-service:8001 (the compose network service name) for the
+    # backend container — no runtime rewriting needed either way.
+    return settings.AI_SERVICE_URL
 
 @router.post("/session/start")
 async def start_session(
