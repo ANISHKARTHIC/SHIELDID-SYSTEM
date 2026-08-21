@@ -60,6 +60,8 @@ def read_root():
 @app.post("/scan/document")
 async def scan_document_endpoint(file: UploadFile = File(...)):
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents, max_dim=1024)
 
     from app.services.image_quality import assess_image_quality
     from app.services.document_classifier import classify_document
@@ -143,6 +145,8 @@ async def classify_document_endpoint(file: UploadFile = File(...)):
     """Step 1: Determine if the uploaded image is a valid identity document,
     and which supported document type it is, so OCR can route correctly."""
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents, max_dim=1024)
     result = classify_document_real(contents)
     if result["is_valid"]:
         type_result = classify_document(contents, file.filename or "")
@@ -166,6 +170,8 @@ async def extract_ocr_endpoint(file: UploadFile = File(...), document_type: str 
     document_type determined during /classify (defaults to UK driving licence
     for backward compatibility if the caller omits it)."""
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents, max_dim=1024)
 
     from app.services.ocr.factory import get_ocr_provider
     ocr_provider = get_ocr_provider()
@@ -200,6 +206,8 @@ async def face_match_endpoint(file: UploadFile = File(...), reference_embedding:
     import os
 
     contents = await file.read()
+    from app.services.image_utils import resize_image_for_ai
+    contents = resize_image_for_ai(contents, max_dim=1024)
     face_provider = model_registry.get_provider('face')
     if face_provider is None or face_provider.app is None:
         raise HTTPException(status_code=503, detail="Face recognition model is not loaded")
