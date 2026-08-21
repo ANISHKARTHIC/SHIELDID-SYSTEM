@@ -340,51 +340,60 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
           ),
 
           // Bottom controls: the shutter is pinned to the true horizontal
-          // center via Stack + Center (not affected by anything else in
-          // the row), and the gallery button is positioned independently
-          // relative to the screen edge. The previous Row-based layout
-          // paired an Align(centerRight)-wrapped gallery button on the
-          // left with an unaligned bare SizedBox spacer on the right —
-          // those aren't equivalent, so the shutter was visibly off-center
-          // (shifted toward the gallery side) instead of centered.
+          // center of the full screen width via Positioned.fill + Center
+          // inside the Stack, not affected by the gallery button. The
+          // previous attempt wrapped this in a plain SizedBox(height: 76)
+          // with no width — a Stack with no incoming width constraint and
+          // a non-Positioned child (the shutter GestureDetector) shrinks
+          // to fit its children instead of filling the screen, so
+          // Alignment.center was centering within a narrow box, not the
+          // real screen width, and the Positioned(left: 32) gallery button
+          // skewed the effective bounds further — both combined to
+          // visibly shift the shutter left of true center on-device.
           if (!widget.isProcessing)
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 28),
                 child: SizedBox(
+                  width: double.infinity,
                   height: 76,
                   child: Stack(
-                    alignment: Alignment.center,
                     children: [
-                      GestureDetector(
-                        onTap: _handleCapture,
-                        child: Container(
-                          width: 76,
-                          height: 76,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 4),
-                          ),
+                      Center(
+                        child: GestureDetector(
+                          onTap: _handleCapture,
                           child: Container(
-                            width: 60,
-                            height: 60,
-                            decoration: const BoxDecoration(
+                            width: 76,
+                            height: 76,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: Colors.white,
+                              border: Border.all(color: Colors.white, width: 4),
+                            ),
+                            child: Container(
+                              width: 60,
+                              height: 60,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
                       ),
                       Positioned(
                         left: 32,
-                        child: _CircleIconButton(
-                          icon: Icons.photo_library_rounded,
-                          tooltip: 'Upload from Gallery',
-                          onPressed: () {
-                            HapticFeedback.selectionClick();
-                            widget.onPickFromGallery();
-                          },
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: _CircleIconButton(
+                            icon: Icons.photo_library_rounded,
+                            tooltip: 'Upload from Gallery',
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              widget.onPickFromGallery();
+                            },
+                          ),
                         ),
                       ),
                     ],
