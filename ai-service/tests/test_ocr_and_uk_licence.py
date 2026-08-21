@@ -156,5 +156,40 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertEqual(fields["issuing_authority"], "DVLA")
         self.assertTrue(result["validation"]["is_valid"])
 
+    def test_miss_title_excluded_from_initials_check(self):
+        # Regression: found on a real UK licence — "MISS GRACELIN
+        # PRIYANKA" was mismatched against a genuinely correct licence
+        # number because "MISS" wasn't in the title stopword list, so the
+        # initials check picked "MG" (Miss, Gracelin) instead of "GP"
+        # (Gracelin, Priyanka) and falsely flagged the number as invalid.
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GP9TF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["errors"], [])
+
+    def test_check_digit_position_14_gets_letter_to_digit_correction(self):
+        # Regression: position 14 (the DVLA formula's "arbitrary digit,
+        # typically 9") previously had zero character-confusion
+        # correction — a printed "9" that EasyOCR misread as "I" (visually
+        # similar in the DVLA card font) passed straight through
+        # uncorrected. Confirmed on a real card: HENRY061082GP9TF OCR'd as
+        # HENRY061082GPITF. The formula itself can't recover the exact
+        # original digit (position 14 carries no checkable information —
+        # it's arbitrary by design), but it must at least get the standard
+        # letter/digit confusion correction applied, same as every other
+        # digit position in the number.
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GPITF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["sanitized_num"][13], "1")  # I -> 1, not left as I
+
 if __name__ == "__main__":
     unittest.main()

@@ -71,17 +71,28 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         - Char 9-10: Day of birth
         - Char 11: Birth year digit (e.g. 7 for 1987)
         - Char 12-13: First 2 initials
-        - Char 14-18: Check characters
+        - Char 14: Arbitrary digit (typically 9), disambiguates drivers with
+          otherwise-identical characters 1-13
+        - Char 15-16: Computer-generated check characters (letters or
+          numbers — genuinely mixed, so left uncorrected)
         """
         num_clean = num.replace(" ", "").upper()
-        
+
         # Sanitize OCR errors based on DVLA formula positions
         if len(num_clean) >= 16:
             p1 = num_clean[:5].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
             p2 = num_clean[5:11].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6")
             p3 = num_clean[11:13].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
-            p4 = num_clean[13:16] # Trim to exactly 16 characters
-            num_clean = p1 + p2 + p3 + p4
+            # Char 14 is always a digit per the DVLA formula (unlike chars
+            # 15-16, which are genuinely mixed letters/numbers) — apply the
+            # same letter->digit correction as the DOB block (p2). Confirmed
+            # real failure mode: a printed "9" here OCR'd as "I" (visually
+            # similar in the DVLA card font), silently corrupting the
+            # licence number since this position previously passed through
+            # with zero correction.
+            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6")
+            p5 = num_clean[14:16] # Check chars — genuinely mixed, left as-is
+            num_clean = p1 + p2 + p3 + p4 + p5
             
         res = {
             "valid": False,
@@ -130,7 +141,13 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     
             # 3. Initials Check (char 12-13)
             if first_names:
-                initial_chars = [w[0] for w in first_names.upper().split() if w not in {"MR", "MRS", "MS", "DR"}]
+                # Confirmed real failure mode: "MISS GRACELIN PRIYANKA" was
+                # missing "MISS" from the title stopword list, so the check
+                # picked initials "MG" (Miss, Gracelin) instead of "GP"
+                # (Gracelin, Priyanka) — a false initials-mismatch error on
+                # a licence number that was actually correct.
+                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR"}
+                initial_chars = [w[0] for w in first_names.upper().split() if w not in titles]
                 expected_initials = ("".join(initial_chars) + "99")[:2]
                 actual_initials = num_clean[11:13]
                 # Allow minor OCR initial variations (check if first initials overlap)

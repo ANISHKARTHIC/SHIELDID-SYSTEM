@@ -35,6 +35,14 @@ class _OCRReviewViewState extends State<OCRReviewView> {
   String? _error;
   String _documentType = 'unknown';
 
+  // From extracted_data.confidences / validation — used to drive the
+  // low-confidence warning icon on fields whose extraction the backend
+  // itself wasn't confident about, instead of hardcoding the licence
+  // number field to always warn regardless of how the extraction went.
+  double? _licenceConfidence;
+  bool _licenceValid = true;
+  static const _lowConfidenceThreshold = 70.0;
+
   static const _notLegiblePlaceholder = 'NOT LEGIBLE';
 
   /// The backend returns this literal string when a field couldn't be
@@ -97,21 +105,49 @@ class _OCRReviewViewState extends State<OCRReviewView> {
       );
 
       final extracted = result['extracted_data'];
+      // uk_driving_licence responses carry surname/first_names already
+      // correctly separated server-side (UKDrivingLicenceProcessor spatially
+      // parses fields 1/2 independently) — use those directly rather than
+      // re-splitting the flattened "name" string by whitespace, which
+      // silently mis-attributes multi-word surnames (e.g. "HENRY CHRISTY
+      // PAUL") to the first-name field since naive splitting has no way to
+      // know where the surname actually ends.
+      final fields = extracted['fields'] as Map<String, dynamic>?;
+      final confidences = extracted['confidences'] as Map<String, dynamic>?;
+      final validationErrors =
+          (result['validation']?['errors'] as List?)?.cast<String>() ?? [];
+
       if (mounted) {
         setState(() {
-          final fullName = extracted['name'] ?? '';
-          final parts = fullName.split(' ');
-
-          _surnameController.text = parts.length > 1 ? parts.last : fullName;
-          _firstNameController.text = parts.length > 1
-              ? parts.sublist(0, parts.length - 1).join(' ')
-              : '';
+          if (fields != null) {
+            _surnameController.text = _cleanField(fields['surname']);
+            _firstNameController.text = _cleanField(fields['first_names']);
+          } else {
+            // Passport / other document types: fall back to the flattened
+            // name, which is all the backend returns for those.
+            final fullName = extracted['name'] ?? '';
+            final parts = fullName.split(' ');
+            _surnameController.text = parts.length > 1 ? parts.last : fullName;
+            _firstNameController.text = parts.length > 1
+                ? parts.sublist(0, parts.length - 1).join(' ')
+                : '';
+          }
           _dobController.text = extracted['dob'] ?? '';
           _licenceController.text = extracted['document_number'] ?? '';
           _addressController.text = _cleanField(extracted['address']);
           _issueDateController.text = _cleanField(extracted['issue_date']);
           _expiryDateController.text = _cleanField(extracted['expiry_date']);
           _documentType = extracted['document_type'] ?? 'unknown';
+
+          final licenceConf = confidences?['licence_number'];
+          _licenceConfidence = licenceConf is num
+              ? licenceConf.toDouble()
+              : null;
+          _licenceValid = validationErrors.every(
+            (e) => !e.toLowerCase().contains('licence number') &&
+                !e.toLowerCase().contains('mismatch'),
+          );
+
           _isLoading = false;
         });
       }
@@ -192,7 +228,10 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     colors,
                     'Licence Number',
                     _licenceController,
-                    isLowConfidence: true,
+                    isLowConfidence: !_licenceValid ||
+                        _licenceController.text.isEmpty ||
+                        (_licenceConfidence != null &&
+                            _licenceConfidence! < _lowConfidenceThreshold),
                   ),
                   const SizedBox(height: 16),
                   _buildEditableField(
