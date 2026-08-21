@@ -1,40 +1,107 @@
 import re
+import logging
 from datetime import datetime
 from .base_processor import BaseDocumentProcessor
+
+logger = logging.getLogger("uk_driving_licence_processor")
+
+# Matches a DD-MM-YYYY-shaped date with . / - or one-or-more spaces as the
+# separator between groups — EasyOCR frequently drops small punctuation
+# like periods on a UK licence's compact date fields, turning "15.06.2020"
+# into "15 06 2020" or worse, so a separator-strict regex silently misses
+# these and leaves date_of_issue/date_of_expiry empty.
+DATE_PATTERN = re.compile(r'\b\d{2}[-/.\s]+\d{2}[-/.\s]+\d{4}\b')
 
 class UKDrivingLicenceProcessor(BaseDocumentProcessor):
     """
     Dedicated processor for UK Driving Licences.
     Extracts DVLA licence fields with spatial and regex validation rules.
     """
-    
+
     def parse_date(self, date_str: str) -> str:
         """
         Helper to extract and format date into YYYY-MM-DD.
-        Supports DD.MM.YYYY, DD/MM/YYYY, YYYY-MM-DD formats.
+        Supports DD.MM.YYYY, DD/MM/YYYY, DD MM YYYY, YYYY-MM-DD formats.
         """
         if not date_str:
             return ""
-        # Clean any OCR noise
-        cleaned = re.sub(r'[^\d\-/\.]', '', date_str).strip()
-        
-        # Matches
-        m1 = re.search(r'\b(\d{2})[-/.](\d{2})[-/.](\d{4})\b', cleaned)
+        # Clean any OCR noise, but keep whitespace as a separator candidate
+        # — EasyOCR frequently drops small punctuation like periods on a
+        # UK licence's compact date fields (e.g. "15.06.2020" -> "15 06
+        # 2020" or even "15062020" if the space is dropped too), and
+        # previously this strip discarded whitespace entirely, gluing the
+        # digit groups together into something no date pattern below could
+        # match — silently leaving date_of_issue/date_of_expiry empty.
+        cleaned = re.sub(r'[^\d\-/\.\s]', '', date_str).strip()
+
+        # Matches (day-month-year, common on UK licences), separator is
+        # one of . / - or one-or-more spaces.
+        m1 = re.search(r'\b(\d{2})[-/.\s]+(\d{2})[-/.\s]+(\d{4})\b', cleaned)
         if m1:
             d, m, y = m1.groups()
             try:
                 return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
             except ValueError:
                 pass
-        
-        m2 = re.search(r'\b(\d{4})[-/.](\d{2})[-/.](\d{2})\b', cleaned)
+
+        m2 = re.search(r'\b(\d{4})[-/.\s]+(\d{2})[-/.\s]+(\d{2})\b', cleaned)
         if m2:
             y, m, d = m2.groups()
             try:
                 return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
             except ValueError:
                 pass
+
+        # Fully glued 8-digit run with no separator at all (e.g. every
+        # separator character, including spaces, got dropped by OCR) —
+        # DD MM YYYY is the UK licence convention, so try that ordering.
+        m3 = re.search(r'\b(\d{2})(\d{2})(\d{4})\b', cleaned)
+        if m3:
+            d, m, y = m3.groups()
+            try:
+                return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
         return ""
+
+    def _clean_address(self, address: str) -> str:
+        """
+        Normalizes an assembled address string: fixes letter/digit
+        confusion inside UK house-number-and-letter codes (e.g. a real
+        card's "H89D" OCR'd as "H8gD" — 'g' for '9' is a plausible visual
+        misread at small size), and strips stray trailing punctuation runs
+        left over from a dropped/garbled final box (e.g. "...SHEFFIELD
+        3,, e" from a badly-read field 9 fragment).
+        """
+        if not address:
+            return address
+
+        # UK addresses on these cards often start with a house identifier
+        # like "H89D" (letter, 2 digits, letter) — a plausible OCR misread
+        # is a lowercase letter standing in for a digit inside that run
+        # (confirmed real failure: "H89D" -> "H8gD", 'g' for '9'). Only
+        # correct a lowercase letter immediately between two uppercase/
+        # digit characters in a short (<=5 char) alphanumeric token — real
+        # words don't mix case like that, so this is safe to fix without
+        # touching genuine street/place names.
+        def fix_house_code(m: re.Match) -> str:
+            token = m.group(0)
+            return re.sub(
+                r'(?<=[A-Z0-9])[a-z](?=[A-Z0-9])',
+                lambda c: {"g": "9", "o": "0", "i": "1", "s": "5", "b": "8", "z": "2"}.get(c.group(0), c.group(0)),
+                token,
+            )
+        address = re.sub(r'\b[A-Za-z0-9]{2,5}\b', fix_house_code, address)
+
+        # Collapse stray trailing punctuation/orphan-fragment noise (",,",
+        # trailing single letters after a comma, etc.) left by a dropped or
+        # garbled final box.
+        address = re.sub(r'(,\s*){2,}', ', ', address)
+        address = re.sub(r',\s*[A-Za-z]{1,2}\s*$', '', address)
+        address = re.sub(r',\s*$', '', address)
+
+        return address.strip()
 
     def validate_licence_number(self, num: str, surname: str, dob: str, first_names: str) -> dict:
         """
@@ -45,17 +112,34 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         - Char 9-10: Day of birth
         - Char 11: Birth year digit (e.g. 7 for 1987)
         - Char 12-13: First 2 initials
-        - Char 14-18: Check characters
+        - Char 14: Arbitrary digit (typically 9), disambiguates drivers with
+          otherwise-identical characters 1-13
+        - Char 15-16: Computer-generated check characters (letters or
+          numbers — genuinely mixed, so left uncorrected)
         """
         num_clean = num.replace(" ", "").upper()
-        
+
         # Sanitize OCR errors based on DVLA formula positions
         if len(num_clean) >= 16:
             p1 = num_clean[:5].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
             p2 = num_clean[5:11].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6")
             p3 = num_clean[11:13].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
-            p4 = num_clean[13:16] # Trim to exactly 16 characters
-            num_clean = p1 + p2 + p3 + p4
+            # Char 14 is always a digit per the DVLA formula (unlike chars
+            # 15-16, which are genuinely mixed letters/numbers) — apply the
+            # same letter->digit correction as the DOB block (p2), with one
+            # difference: "G" resolves to "9" here, not "6". Confirmed real
+            # failure modes for this position: a printed "9" OCR'd as "I"
+            # (visually similar in the DVLA card font — fixed by the O/I/S/
+            # Z/B map below), or as a lowercase "g" that .upper() above
+            # turns into "G" (the same 9<->g visual confusion already
+            # handled in _clean_address for house codes, e.g. "H89D" ->
+            # "H8gD"). Since this position's DVLA-documented expected value
+            # is "typically 9" (not 6), a G-shaped misread here should
+            # resolve to 9 rather than the generic G->6 digit-block mapping
+            # used elsewhere (e.g. p2's DOB block, where 6 is a real digit).
+            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "9")
+            p5 = num_clean[14:16] # Check chars — genuinely mixed, left as-is
+            num_clean = p1 + p2 + p3 + p4 + p5
             
         res = {
             "valid": False,
@@ -104,7 +188,13 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     
             # 3. Initials Check (char 12-13)
             if first_names:
-                initial_chars = [w[0] for w in first_names.upper().split() if w not in {"MR", "MRS", "MS", "DR"}]
+                # Confirmed real failure mode: "MISS GRACELIN PRIYANKA" was
+                # missing "MISS" from the title stopword list, so the check
+                # picked initials "MG" (Miss, Gracelin) instead of "GP"
+                # (Gracelin, Priyanka) — a false initials-mismatch error on
+                # a licence number that was actually correct.
+                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR"}
+                initial_chars = [w[0] for w in first_names.upper().split() if w not in titles]
                 expected_initials = ("".join(initial_chars) + "99")[:2]
                 actual_initials = num_clean[11:13]
                 # Allow minor OCR initial variations (check if first initials overlap)
@@ -168,7 +258,18 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 line.sort(key=lambda b: b["x"])
                 sorted_boxes.extend(line)
             boxes = sorted_boxes
-        
+
+        # Final spatial box order (text, y, confidence%) — the ground truth
+        # for diagnosing field-assembly bugs like address lines coming out
+        # in the wrong order or a stray box getting appended to a field:
+        # compare this against the raw (pre-sort) EasyOCR log from
+        # easy_ocr_provider.py to tell a genuine spatial mis-sort apart
+        # from noisy/misread text.
+        logger.info(
+            "Sorted boxes (text, y, confidence%%): %s",
+            [(b["text"], round(b["y"], 1), round(b["conf"], 1)) for b in boxes],
+        )
+
         # Output structure
         fields = {
             "surname": "",
@@ -224,7 +325,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     confidences["date_of_birth"] = box["conf"]
                     confidences["place_of_birth"] = box["conf"]
                 
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     dob_raw = date_match.group(0)
                     fields["date_of_birth"] = self.parse_date(dob_raw)
@@ -232,7 +333,10 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 else:
                     fields["place_of_birth"] = val
                     
-            # Field 4a & 4c: Issue Date & Issuing Authority
+            # Field 4a: Issue Date (and inline 4c if merged onto the same
+            # OCR box/line — real DVLA cards usually print 4a/4b/4c as
+            # separate lines, handled by the standalone 4C branch below,
+            # but some crops/fonts get merged into one EasyOCR box).
             elif "4A" in t or re.match(r'^4[\s]*A', t):
                 val = re.sub(r'^.*?4[\s]*A[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
@@ -240,17 +344,17 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     confidences["date_of_issue"] = boxes[i+1]["conf"]
                 else:
                     confidences["date_of_issue"] = box["conf"]
-                    
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     fields["date_of_issue"] = self.parse_date(date_match.group(0))
-                
+
                 if "4C" in t or re.search(r'4[\s]*C', t):
                     c_parts = re.split(r'4[\s]*C', t)
                     if len(c_parts) > 1:
                         fields["issuing_authority"] = re.sub(r'^[\W_]+', '', c_parts[1]).strip()
                         confidences["issuing_authority"] = box["conf"]
-                        
+
             # Field 4b: Expiry Date
             elif "4B" in t or re.match(r'^4[\s]*B', t):
                 val = re.sub(r'^.*?4[\s]*B[\W_]*', '', t).strip()
@@ -260,10 +364,25 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 else:
                     confidences["date_of_expiry"] = box["conf"]
                     
-                date_match = re.search(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b', val)
+                date_match = DATE_PATTERN.search(val)
                 if date_match:
                     fields["date_of_expiry"] = self.parse_date(date_match.group(0))
-                    
+
+            # Field 4c: Issuing Authority, printed as its own line on real
+            # DVLA cards (the vast majority of scans hit this branch, not
+            # the inline-merged case in the 4A branch above — that path was
+            # previously the *only* way issuing_authority got populated,
+            # which meant it silently stayed empty whenever 4a/4c were
+            # separate OCR boxes, the normal case).
+            elif "4C" in t or re.match(r'^4[\s]*C', t):
+                val = re.sub(r'^.*?4[\s]*C[\W_]*', '', t).strip()
+                if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
+                    val = boxes[i+1]["text"]
+                    confidences["issuing_authority"] = boxes[i+1]["conf"]
+                else:
+                    confidences["issuing_authority"] = box["conf"]
+                fields["issuing_authority"] = val
+
             # Field 5: Licence Number
             elif re.match(r'^5[\W_]*[A-Z]', t) or t.startswith("5.") or t == "5":
                 val = re.sub(r'^5[\W_]*', '', t).strip()
@@ -284,10 +403,24 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 for next_idx in range(i+1, min(i+4, len(boxes))):
                     next_box = boxes[next_idx]
                     next_text = next_box["text"].upper()
-                    if re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or next_text in ["1", "2", "3", "4A", "4B", "4C", "5", "8", "9"]:
+                    # Field 9 (licence categories, e.g. "9. AM/A/B/I/K/Q")
+                    # often loses its "9." label to OCR, and a badly
+                    # misread categories line can end up as a short
+                    # fragment (e.g. a single stray letter) that doesn't
+                    # start with a digit — the original digit-only check
+                    # let that fall through and get silently appended to
+                    # the address as trailing junk. A short (<=4 char)
+                    # trailing box this far into the address is far more
+                    # likely to be exactly that than a genuine third
+                    # address line, so stop there too.
+                    is_new_field = re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or next_text in [
+                        "1", "2", "3", "4A", "4B", "4C", "5", "8", "9"
+                    ]
+                    is_short_trailing_fragment = len(addr_parts) >= 1 and len(next_text.strip()) <= 4
+                    if is_new_field or is_short_trailing_fragment:
                         break
                     addr_parts.append(next_box["text"])
-                fields["address"] = ", ".join(addr_parts).strip(", ")
+                fields["address"] = self._clean_address(", ".join(addr_parts).strip(", "))
 
         # Clean up Names if they accidentally merged with numeric labels (e.g. "3 MR JOHN WILBERT")
         if fields["surname"]:
@@ -363,7 +496,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
 
         if not fields["date_of_birth"]:
             # If DOB label failed, parse earliest date found in the file
-            date_regex = re.compile(r'\b\d{2}[-/\.]\d{2}[-/\.]\d{4}\b')
+            date_regex = DATE_PATTERN
             found_dates = []
             for box in boxes:
                 for match in date_regex.finditer(box["text"]):

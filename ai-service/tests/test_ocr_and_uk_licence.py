@@ -13,6 +13,18 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertEqual(self.processor.parse_date("1995-12-19"), "1995-12-19")
         self.assertEqual(self.processor.parse_date("invalid"), "")
 
+    def test_parse_date_handles_ocr_dropped_periods(self):
+        # Regression: EasyOCR frequently drops small punctuation like the
+        # periods in a UK licence's compact date fields. The old cleaning
+        # step stripped whitespace entirely (not just non-date chars),
+        # which glued "15 06 2020" into "15062020" — a shape no date
+        # pattern matched, silently leaving the field empty.
+        self.assertEqual(self.processor.parse_date("15 06 2020"), "2020-06-15")
+        self.assertEqual(self.processor.parse_date("15  06  2020"), "2020-06-15")
+        # Every separator dropped, including spaces — falls back to DD MM
+        # YYYY interpretation of the glued digit run.
+        self.assertEqual(self.processor.parse_date("15062020"), "2020-06-15")
+
     def test_parse_uk_driver_number_male(self):
         # SMITH901018AB9IJ
         # Surname: SMITH
@@ -81,6 +93,161 @@ class TestOCRAndUKLicence(unittest.TestCase):
         ]
         result = self.processor.process(ocr_results)
         self.assertEqual(result["fields"]["licence_number"], "SMITH901010JO9IJ")
+
+    def test_issuing_authority_extracted_from_standalone_4c_line(self):
+        # Regression: real DVLA cards print 4a/4b/4c as three separate
+        # lines, not merged into one OCR box. issuing_authority used to be
+        # populated only via a nested check inside the 4A branch, so it
+        # silently stayed empty for this — the normal — case, since there
+        # was no standalone "elif 4C" branch at all.
+        ocr_results = [
+            self._box("1. SMITH", y=80),
+            self._box("2. JOHN MICHAEL", y=110),
+            self._box("3. 01.01.1990 UK", y=140),
+            self._box("4a. 15.06.2020", y=170),
+            self._box("4b. 14.06.2030", y=200),
+            self._box("4c. DVLA", y=230),
+            self._box("5. SMITH901010JM9IJ", y=260),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+        self.assertEqual(fields["date_of_expiry"], "2030-06-14")
+
+    def test_issuing_authority_extracted_from_merged_4a_4c_line(self):
+        # The original merged-box code path (4a and 4c OCR'd onto the same
+        # line) must keep working alongside the new standalone-4C branch.
+        ocr_results = [
+            self._box("1. SMITH", y=80),
+            self._box("2. JOHN", y=110),
+            self._box("3. 01.01.1990", y=140),
+            self._box("4a. 15.06.2020 4c. DVLA", y=170),
+            self._box("4b. 14.06.2030", y=200),
+            self._box("5. SMITH901010JO9IJ", y=230),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+
+    def test_full_extraction_survives_ocr_dropped_periods(self):
+        # Regression: realistic noisy OCR output with periods dropped from
+        # every field (common — periods are small and easily missed by the
+        # text detector, especially at lower resolution/blur). Before the
+        # date-regex fix, date_of_issue/date_of_expiry silently stayed
+        # empty and place_of_birth incorrectly retained the full "01 01
+        # 1990 UK" string instead of extracting just "UK".
+        ocr_results = [
+            self._box("1 SMITH", y=80),
+            self._box("2 JOHN MICHAEL", y=110),
+            self._box("3 01 01 1990 UK", y=140),
+            self._box("4a 15 06 2020", y=170),
+            self._box("4b 14 06 2030", y=200),
+            self._box("4c DVLA", y=230),
+            self._box("5 SMITH901010JM9IJ", y=260),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["date_of_birth"], "1990-01-01")
+        self.assertEqual(fields["place_of_birth"], "UK")
+        self.assertEqual(fields["date_of_issue"], "2020-06-15")
+        self.assertEqual(fields["date_of_expiry"], "2030-06-14")
+        self.assertEqual(fields["issuing_authority"], "DVLA")
+        self.assertTrue(result["validation"]["is_valid"])
+
+    def test_miss_title_excluded_from_initials_check(self):
+        # Regression: found on a real UK licence — "MISS GRACELIN
+        # PRIYANKA" was mismatched against a genuinely correct licence
+        # number because "MISS" wasn't in the title stopword list, so the
+        # initials check picked "MG" (Miss, Gracelin) instead of "GP"
+        # (Gracelin, Priyanka) and falsely flagged the number as invalid.
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GP9TF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["errors"], [])
+
+    def test_check_digit_position_14_gets_letter_to_digit_correction(self):
+        # Regression: position 14 (the DVLA formula's "arbitrary digit,
+        # typically 9") previously had zero character-confusion
+        # correction — a printed "9" that EasyOCR misread as "I" (visually
+        # similar in the DVLA card font) passed straight through
+        # uncorrected. Confirmed on a real card: HENRY061082GP9TF OCR'd as
+        # HENRY061082GPITF. The formula itself can't recover the exact
+        # original digit (position 14 carries no checkable information —
+        # it's arbitrary by design), but it must at least get the standard
+        # letter/digit confusion correction applied, same as every other
+        # digit position in the number.
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GPITF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["sanitized_num"][13], "1")  # I -> 1, not left as I
+
+    def test_check_digit_position_14_g_resolves_to_9_not_6(self):
+        # Regression: position 14's expected value is "typically 9" per the
+        # DVLA formula, and a lowercase "g" OCR misread of "9" is a
+        # confirmed real failure mode elsewhere in this file (see
+        # _clean_address's "H89D" -> "H8gD" case). validate_licence_number
+        # upper()s the whole string before this correction runs, so that
+        # "g" arrives here as "G" — which must resolve to "9" for this
+        # position, not to "6" (the generic G->6 mapping used in the DOB
+        # block, p2, where 6 is a real expected digit).
+        res = self.processor.validate_licence_number(
+            num="HENRY061082GPGTF",
+            surname="HENRY",
+            dob="08.11.2002",
+            first_names="MISS GRACELIN PRIYANKA",
+        )
+        self.assertTrue(res["valid"], res["errors"])
+        self.assertEqual(res["sanitized_num"][13], "9")  # G -> 9, not 6
+
+    def test_clean_address_fixes_house_code_letter_digit_confusion(self):
+        # Regression: found on a real card — "H89D" (house identifier)
+        # OCR'd as "H8gD", 'g' standing in for '9'.
+        result = self.processor._clean_address("H8gD 80 HOYLE STREET, SHEFFIELD")
+        self.assertIn("H89D", result)
+        self.assertNotIn("H8gD", result)
+
+    def test_clean_address_strips_trailing_garbled_fragment(self):
+        # Regression: a badly-read field 9 (licence categories) line with
+        # no leading digit label fell through the address-continuation
+        # loop's break check and got silently appended as trailing junk.
+        result = self.processor._clean_address(
+            "H89D 80 HOYLE STREET, SHEFFIELD 3,, e"
+        )
+        self.assertEqual(result, "H89D 80 HOYLE STREET, SHEFFIELD 3")
+
+    def test_clean_address_leaves_genuine_text_untouched(self):
+        clean = "H89D 80 HOYLE STREET, SHEFFIELD 3, SHEFFIELD, S3 7LG"
+        self.assertEqual(self.processor._clean_address(clean), clean)
+
+    def test_address_stops_at_unlabeled_short_categories_fragment(self):
+        # Full pipeline: field 9 (categories) dropped its "9." label and
+        # OCR'd as a short garbled fragment — must not be swallowed into
+        # the address.
+        ocr_results = [
+            self._box("1. HENRY CHRISTY PAUL", y=80),
+            self._box("2. MISS GRACELIN PRIYANKA", y=110),
+            self._box("3. 08.11.2002 INDIA", y=140),
+            self._box("4a. 15.05.2026", y=170),
+            self._box("4b. 14.05.2036", y=200),
+            self._box("4c. DVLA", y=230),
+            self._box("5. HENRY061082GP9TF", y=260),
+            self._box("8. H89D 80 HOYLE STREET, SHEFFIELD 3,", y=290),
+            self._box("SHEFFIELD, S3 7LG", y=315),
+            self._box("e", y=340),  # garbled, label-less field 9 fragment
+        ]
+        result = self.processor.process(ocr_results)
+        self.assertNotIn("e", result["fields"]["address"].split(", ")[-1].strip())
+        self.assertNotIn(",,", result["fields"]["address"])
 
 if __name__ == "__main__":
     unittest.main()

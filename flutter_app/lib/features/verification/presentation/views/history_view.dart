@@ -126,7 +126,7 @@ class _HistoryViewState extends State<HistoryView> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Session ${item['session_id'].toString().substring(0, 8)}',
+                          'Session ${_shortSessionId(item['session_id'])}',
                           style: AppTypography.footnote.copyWith(
                             color: colors.muted,
                             fontWeight: FontWeight.w500,
@@ -173,6 +173,11 @@ class _HistoryViewState extends State<HistoryView> {
         );
       },
     );
+  }
+
+  String _shortSessionId(dynamic sessionId) {
+    final id = sessionId?.toString() ?? '';
+    return id.length > 8 ? id.substring(0, 8) : id;
   }
 
   Color _statusColor(String decision, AppColorsExt colors) {

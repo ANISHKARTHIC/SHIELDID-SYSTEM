@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'face_capture_view.dart';
 import 'dart:io';
@@ -34,6 +35,21 @@ class _OCRReviewViewState extends State<OCRReviewView> {
   bool _isLoading = true;
   String? _error;
   String _documentType = 'unknown';
+
+  // From extracted_data.confidences / validation — used to drive the
+  // low-confidence warning icon on fields whose extraction the backend
+  // itself wasn't confident about, instead of hardcoding the licence
+  // number field to always warn regardless of how the extraction went.
+  double? _licenceConfidence;
+  bool _licenceValid = true;
+  static const _lowConfidenceThreshold = 70.0;
+
+  // Overall document-legitimacy result from the backend's DVLA-formula
+  // cross-check (validation.is_valid / validation.errors) — surfaced as a
+  // visible pass/fail banner rather than only being available buried in
+  // per-field warning icons or the backend log.
+  bool _documentValid = true;
+  List<String> _validationErrors = [];
 
   static const _notLegiblePlaceholder = 'NOT LEGIBLE';
 
@@ -97,28 +113,80 @@ class _OCRReviewViewState extends State<OCRReviewView> {
       );
 
       final extracted = result['extracted_data'];
+      // uk_driving_licence responses carry surname/first_names already
+      // correctly separated server-side (UKDrivingLicenceProcessor spatially
+      // parses fields 1/2 independently) — use those directly rather than
+      // re-splitting the flattened "name" string by whitespace, which
+      // silently mis-attributes multi-word surnames (e.g. "HENRY CHRISTY
+      // PAUL") to the first-name field since naive splitting has no way to
+      // know where the surname actually ends.
+      final fields = extracted['fields'] as Map<String, dynamic>?;
+      final confidences = extracted['confidences'] as Map<String, dynamic>?;
+      // extracted_data.validation is the DVLA-formula legitimacy check
+      // (surname/DOB/initials cross-checked against the licence number
+      // itself, from UKDrivingLicenceProcessor) — distinct from the
+      // top-level result['validation'], which only checks field
+      // completeness and age, not whether the licence number's own
+      // encoded data is internally consistent. The legitimacy banner
+      // needs the former.
+      final licenceValidation =
+          extracted['validation'] as Map<String, dynamic>?;
+      final validationErrors =
+          (licenceValidation?['errors'] as List?)?.cast<String>() ?? [];
+
       if (mounted) {
         setState(() {
-          final fullName = extracted['name'] ?? '';
-          final parts = fullName.split(' ');
-
-          _surnameController.text = parts.length > 1 ? parts.last : fullName;
-          _firstNameController.text = parts.length > 1
-              ? parts.sublist(0, parts.length - 1).join(' ')
-              : '';
+          if (fields != null) {
+            _surnameController.text = _cleanField(fields['surname']);
+            _firstNameController.text = _cleanField(fields['first_names']);
+          } else {
+            // Passport / other document types: fall back to the flattened
+            // name, which is all the backend returns for those.
+            final fullName = extracted['name'] ?? '';
+            final parts = fullName.split(' ');
+            _surnameController.text = parts.length > 1 ? parts.last : fullName;
+            _firstNameController.text = parts.length > 1
+                ? parts.sublist(0, parts.length - 1).join(' ')
+                : '';
+          }
           _dobController.text = extracted['dob'] ?? '';
           _licenceController.text = extracted['document_number'] ?? '';
           _addressController.text = _cleanField(extracted['address']);
           _issueDateController.text = _cleanField(extracted['issue_date']);
           _expiryDateController.text = _cleanField(extracted['expiry_date']);
           _documentType = extracted['document_type'] ?? 'unknown';
+
+          final licenceConf = confidences?['licence_number'];
+          _licenceConfidence = licenceConf is num
+              ? licenceConf.toDouble()
+              : null;
+          _licenceValid = validationErrors.every(
+            (e) => !e.toLowerCase().contains('licence number') &&
+                !e.toLowerCase().contains('mismatch'),
+          );
+
+          _documentValid = licenceValidation?['is_valid'] as bool? ?? true;
+          _validationErrors = validationErrors;
+
           _isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not read this document. Please try again.';
+          // A timeout means the server was still working (document/face
+          // scanning runs real ML inference and can legitimately take a
+          // while, especially on a cold-started or CPU-only backend) —
+          // distinct from an actual bad/illegible photo, so it gets its
+          // own message rather than the generic "could not read" one,
+          // which reads as if the photo itself was rejected.
+          final isTimeout = e is DioException &&
+              (e.type == DioExceptionType.receiveTimeout ||
+                  e.type == DioExceptionType.sendTimeout ||
+                  e.type == DioExceptionType.connectionTimeout);
+          _error = isTimeout
+              ? 'The verification service is taking longer than usual. Please try again.'
+              : 'Could not read this document. Please try again.';
           _isLoading = false;
         });
       }
@@ -169,6 +237,10 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     ),
                   ),
                   const SizedBox(height: 18),
+                  if (_documentType == 'uk_driving_licence')
+                    _buildLegitimacyBanner(colors),
+                  if (_documentType == 'uk_driving_licence')
+                    const SizedBox(height: 14),
                   Text(
                     'Confirm extracted identity data before continuing.',
                     style: TextStyle(
@@ -192,7 +264,10 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     colors,
                     'Licence Number',
                     _licenceController,
-                    isLowConfidence: true,
+                    isLowConfidence: !_licenceValid ||
+                        _licenceController.text.isEmpty ||
+                        (_licenceConfidence != null &&
+                            _licenceConfidence! < _lowConfidenceThreshold),
                   ),
                   const SizedBox(height: 16),
                   _buildEditableField(
@@ -219,6 +294,19 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                   const SizedBox(height: 40),
                   ElevatedButton(
                     onPressed: () {
+                      if (_surnameController.text.trim().isEmpty ||
+                          _firstNameController.text.trim().isEmpty ||
+                          _dobController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Surname, first name and date of birth are required before continuing.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
                       final ocrData = {
                         'ocr_name':
                             '${_firstNameController.text} ${_surnameController.text}'
@@ -258,6 +346,63 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                 ],
               ),
             ),
+    );
+  }
+
+  /// Surfaces the backend's DVLA-formula legitimacy check (surname/DOB/
+  /// initials cross-validated against the licence number's own encoded
+  /// data) as a visible pass/fail mark, instead of leaving it only
+  /// reachable via the per-field warning icon or the backend log.
+  Widget _buildLegitimacyBanner(AppColorsExt colors) {
+    final bg = _documentValid ? colors.successSoft : colors.dangerSoft;
+    final fg = _documentValid ? colors.success : colors.danger;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: fg.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _documentValid
+                    ? Icons.verified_rounded
+                    : Icons.gpp_bad_rounded,
+                color: fg,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _documentValid
+                    ? 'Licence number verified'
+                    : 'Licence number could not be verified',
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          if (!_documentValid && _validationErrors.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            ..._validationErrors.map(
+              (e) => Padding(
+                padding: const EdgeInsets.only(left: 28, top: 2),
+                child: Text(
+                  e,
+                  style: TextStyle(color: fg, fontSize: 12.5),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

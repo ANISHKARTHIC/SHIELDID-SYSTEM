@@ -1,11 +1,14 @@
 import os
 import re
+import logging
 import numpy as np
 import cv2
 from PIL import Image
 import io
 from datetime import datetime
 from .base import BaseOCR
+
+logger = logging.getLogger("easy_ocr_provider")
 
 # Defaults to EasyOCR's own default (~/.EasyOCR) for local dev; the Docker
 # image sets this to a baked-in in-image path so weights don't re-download
@@ -125,7 +128,16 @@ class EasyOCRProvider(BaseOCR):
         confidences = [r[2] for r in results]
         avg_confidence = float(np.mean(confidences)) * 100 if confidences else 0.0
 
-        print(f"OCR Extracted Lines: {lines}")
+        # Raw per-line text + confidence is the ground truth for diagnosing
+        # extraction accuracy — logged as (text, confidence%) pairs so a bad
+        # extraction can be traced back to either a genuine OCR misread (low
+        # confidence on the culprit line) or a parsing-logic bug in
+        # UKDrivingLicenceProcessor (high-confidence raw text, wrong parsed
+        # field). Compare this against v1_router's "OCR extraction" log on
+        # the backend side, which shows what came out the other end.
+        raw_lines_with_conf = [(r[1].strip(), round(float(r[2]) * 100, 1)) for r in results]
+        logger.info("Raw OCR lines (text, confidence%%): %s", raw_lines_with_conf)
+
         if not lines:
             raise ValueError("No legible text could be extracted from the document. Please ensure the camera is in focus.")
 
@@ -134,8 +146,15 @@ class EasyOCRProvider(BaseOCR):
             from .uk_driving_licence_processor import UKDrivingLicenceProcessor
             processor = UKDrivingLicenceProcessor()
             processed_data = processor.process(results)
-            
+
             fields = processed_data["fields"]
+            logger.info(
+                "UK licence parsed fields=%s confidences=%s valid=%s errors=%s",
+                fields,
+                processed_data["confidences"],
+                processed_data["validation"]["is_valid"],
+                processed_data["validation"]["errors"],
+            )
             return {
                 # Flat properties for compatibility with OCRResponse schema
                 "name": f"{fields['first_names']} {fields['surname']}".strip(),
@@ -145,7 +164,7 @@ class EasyOCRProvider(BaseOCR):
                 "expiry_date": fields["date_of_expiry"],
                 "issue_date": fields["date_of_issue"],
                 "confidence": processed_data.get("avg_critical_conf", processed_data["confidences"]["licence_number"]),
-                
+
                 # New template extensions
                 "document_type": "uk_driving_licence",
                 "fields": fields,

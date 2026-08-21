@@ -1,26 +1,37 @@
 from datetime import datetime
 from dateutil import parser
+import logging
 import math
+
+logger = logging.getLogger("data_validation")
 
 def calculate_age(dob_str: str) -> dict:
     """
     Parses DOB and calculates current age.
     """
     try:
-        dob = parser.parse(dob_str)
+        # dayfirst=True: UK documents (the only document types this service
+        # parses) use DD/MM/YYYY, but dateutil.parser.parse defaults to
+        # month-first for ambiguous numeric dates (e.g. "03/04/1990" would
+        # otherwise parse as March 4th instead of April 3rd). ISO
+        # "YYYY-MM-DD" strings — what the licence processor's own
+        # parse_date normally hands this function — are unambiguous and
+        # unaffected by this flag either way.
+        dob = parser.parse(dob_str, dayfirst=True)
         today = datetime.today()
-        
+
         # Calculate precise age
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-        
+
         is_over_18 = age >= 18
-        
+
         return {
             "age": age,
             "is_over_18": is_over_18,
             "error": None
         }
     except Exception as e:
+        logger.debug("calculate_age failed to parse dob_str=%r: %s", dob_str, e)
         return {
             "age": None,
             "is_over_18": None,

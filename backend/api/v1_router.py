@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 import httpx
 import json
@@ -13,20 +14,19 @@ from backend.schemas.schemas import BlacklistCreate, IncidentCreate, Verificatio
 from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
 from backend.core.config import settings
+from backend.core.logger import get_logger
+
+logger = get_logger("ocr_extraction")
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_active_user)])
 
 def get_ai_service_url() -> str:
-    import os
-    env_url = os.getenv("AI_SERVICE_URL")
-    if env_url and "localhost" not in env_url:
-        return env_url
-    if os.getenv("POSTGRES_SERVER") == "db":
-        return "http://ai-service:8001"
-    url = settings.AI_SERVICE_URL
-    if "localhost" in url:
-        url = url.replace("localhost", "ai-service")
-    return url
+    # settings.AI_SERVICE_URL already resolves the right value for both
+    # cases: it defaults to http://localhost:8001 for local dev, and
+    # docker-compose.yml sets the AI_SERVICE_URL env var explicitly to
+    # http://ai-service:8001 (the compose network service name) for the
+    # backend container — no runtime rewriting needed either way.
+    return settings.AI_SERVICE_URL
 
 @router.post("/session/start")
 async def start_session(
@@ -55,6 +55,7 @@ async def get_operator_stats(
 
     return {
         "operator_name": current_user.email.split("@")[0],
+        "venue_name": current_user.venue.name if current_user.venue else None,
         "verified": verified,
         "pending": pending,
         "flagged": flagged
@@ -65,9 +66,15 @@ async def classify_document(
     session_id: str,
     file: UploadFile = File(...),
     redis_client = Depends(get_redis),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Step 1: Upload ID and classify"""
+    try:
+        session_service.assert_session_venue(db, session_id, current_user.venue_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found or expired")
+
     session_data_str = redis_client.get(f"session:{session_id}")
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -122,9 +129,15 @@ async def extract_ocr(
     session_id: str,
     file: UploadFile = File(...),
     redis_client = Depends(get_redis),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Step 2: OCR Extract"""
+    try:
+        session_service.assert_session_venue(db, session_id, current_user.venue_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     session_data_str = redis_client.get(f"session:{session_id}")
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -151,14 +164,36 @@ async def extract_ocr(
             session_data["validation"] = result["validation"]
             session_data["step"] = 3
             redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
-            
+
+            # Log exactly what was extracted vs. how confident/valid it was,
+            # per-field — this is the primary tool for diagnosing bad
+            # extractions (wrong surname, mismatched DOB, etc.) after the
+            # fact: grep the backend log for the session_id to see the full
+            # field/confidence/validation picture ai-service returned,
+            # without needing to reproduce the scan.
+            extracted = result.get("extracted_data", {})
+            fields = extracted.get("fields", extracted)
+            confidences = extracted.get("confidences", {})
+            validation = result.get("validation", {})
+            logger.info(
+                "OCR extraction session=%s doc_type=%s fields=%s confidences=%s "
+                "avg_confidence=%s valid=%s errors=%s",
+                session_id,
+                document_type,
+                json.dumps(fields, default=str),
+                json.dumps(confidences, default=str),
+                extracted.get("confidence"),
+                validation.get("is_valid"),
+                validation.get("errors"),
+            )
+
             # Update state
             try:
                 session_service.update_session_data(db, session_id, {"ocr_data": result["extracted_data"]})
                 session_service.transition_state(db, session_id, SessionStateEnum.OCR_COMPLETED)
             except ValueError as e:
                 pass # Ignoring errors for now
-            
+
             return result
         elif response.status_code == 422:
             raise HTTPException(status_code=422, detail=response.json().get("message", "No legible text could be extracted from the document."))
@@ -174,6 +209,11 @@ async def face_match(
     current_user: User = Depends(get_current_active_user)
 ):
     """Step 3: Capture Face & Match"""
+    try:
+        session_service.assert_session_venue(db, session_id, current_user.venue_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     session_data_str = redis_client.get(f"session:{session_id}")
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -336,17 +376,46 @@ async def finalize_session(
     current_user: User = Depends(get_current_active_user)
 ):
     """Step 4: Finalize and save to PostgreSQL with expires_at"""
+    try:
+        session_service.assert_session_venue(db, session_id, current_user.venue_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
     session_data_str = redis_client.get(f"session:{session_id}")
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found")
     session_data = json.loads(session_data_str)
-    
+
     ocr = session_data.get("ocr")
     if not ocr:
         raise HTTPException(status_code=400, detail="Incomplete session")
-        
+
+    # The face-capture/match step (/session/{id}/face) must have run before
+    # a session can be finalized as "pass" — without this, an operator (or
+    # a client that crashes/drops after OCR) could call /finalize directly
+    # from step 3, approving entry with zero face verification and, since
+    # the blacklist lookup only happens inside /face, with zero blacklist
+    # check either. CHECK/DENY/BLOCK outcomes don't need this guard since
+    # they're already the safe/restrictive path.
+    if decision.staff_decision.lower() == "pass" and session_data.get("step", 0) < 4:
+        raise HTTPException(status_code=400, detail="Face verification must be completed before approving entry")
+
     unique_id = ocr.get("document_number")
     customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
+
+    # Safety-net blacklist check: /face already checks this and blocks the
+    # session, but finalize must not trust the client to have taken that
+    # path faithfully — re-check directly against the DB before honoring a
+    # "pass" so a stale/replayed session_data blob or a decision issued
+    # after a ban was created mid-session can't slip through.
+    if customer and decision.staff_decision.lower() == "pass":
+        active_ban = db.query(Blacklist).filter(
+            Blacklist.customer_id == customer.id
+        ).filter(
+            (Blacklist.expiry_date.is_(None)) | (Blacklist.expiry_date > datetime.now(timezone.utc))
+        ).first()
+        if active_ban:
+            raise HTTPException(status_code=409, detail="Customer has an active venue restriction and cannot be approved")
 
     # State mapping (computed early so retention window can vary by outcome)
     final_decision_str = decision.staff_decision.lower()
@@ -357,7 +426,10 @@ async def finalize_session(
         if dob_str:
             try:
                 from dateutil import parser as date_parser
-                dob_date = date_parser.parse(dob_str)
+                # dayfirst=True: UK documents use DD/MM/YYYY; dateutil
+                # defaults to month-first for ambiguous numeric dates
+                # otherwise (e.g. "03/04/1990" would parse as March 4th).
+                dob_date = date_parser.parse(dob_str, dayfirst=True)
             except Exception:
                 dob_date = None
 
@@ -394,7 +466,9 @@ async def finalize_session(
             return None
         try:
             from dateutil import parser as date_parser
-            return date_parser.parse(value)
+            # dayfirst=True: same UK DD/MM/YYYY convention as the DOB parse
+            # above — avoids month/day ambiguity for issue/expiry dates.
+            return date_parser.parse(value, dayfirst=True)
         except Exception:
             return None
 
@@ -446,13 +520,22 @@ async def finalize_session(
     if final_state == SessionStateEnum.APPROVED:
         # Person is now inside the venue — separate table from
         # VerificationSession since occupancy needs to keep changing
-        # (checkout, auto-expire) after the session itself is locked.
+        # (checkout, auto-expire) after the session itself is locked. The
+        # DB enforces at most one open (exited_at IS NULL) row per
+        # (venue_id, customer_id) via uq_occupancy_open_per_venue_customer —
+        # a concurrent duplicate finalize for the same customer raises
+        # IntegrityError here rather than silently creating a second open
+        # row, so surface that as a clear conflict instead of a raw 500.
         db.add(Occupancy(
             venue_id=current_user.venue_id,
             customer_id=customer.id,
             session_id=session_id,
         ))
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Customer is already checked in at this venue")
 
     redis_client.delete(f"session:{session_id}")
     

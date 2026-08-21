@@ -69,8 +69,23 @@ def deactivate_venue(venue_id: int, db: Session = Depends(get_db)):
     return venue
 
 
+def _assert_owns_venue(current_user: User, venue_id: int):
+    # Same ownership check as get_venue/update_venue above — config and
+    # policy are at least as sensitive as the venue record itself (policy
+    # controls whether face-match/age checks are even enforced), so they
+    # need the identical guard. Its prior absence here meant a venue_admin
+    # could silently rewrite another venue's security policy.
+    if current_user.role != RoleEnum.super_admin and venue_id != current_user.venue_id:
+        raise HTTPException(status_code=403, detail="Cannot access another venue")
+
+
 @router.get("/{venue_id}/config")
-def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
+def get_venue_config(
+    venue_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    _assert_owns_venue(current_user, venue_id)
     config = venue_service.get_venue_configuration(db, venue_id)
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -85,12 +100,23 @@ def get_venue_config(venue_id: int, db: Session = Depends(get_db)):
     }
 
 @router.put("/{venue_id}/config", dependencies=[Depends(require_admin)])
-def update_venue_config(venue_id: int, updates: Dict[str, Any], db: Session = Depends(get_db)):
+def update_venue_config(
+    venue_id: int,
+    updates: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    _assert_owns_venue(current_user, venue_id)
     config = venue_service.update_configuration(db, venue_id, updates)
     return {"message": "Configuration updated successfully", "config_id": config.id}
 
 @router.get("/{venue_id}/policy")
-def get_venue_policy(venue_id: int, db: Session = Depends(get_db)):
+def get_venue_policy(
+    venue_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    _assert_owns_venue(current_user, venue_id)
     policy = venue_service.get_venue_policy(db, venue_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -104,6 +130,12 @@ def get_venue_policy(venue_id: int, db: Session = Depends(get_db)):
     }
 
 @router.put("/{venue_id}/policy", dependencies=[Depends(require_admin)])
-def update_venue_policy(venue_id: int, updates: Dict[str, Any], db: Session = Depends(get_db)):
+def update_venue_policy(
+    venue_id: int,
+    updates: Dict[str, Any],
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    _assert_owns_venue(current_user, venue_id)
     policy = venue_service.update_policy(db, venue_id, updates)
     return {"message": "Policy updated successfully", "policy_id": policy.id}

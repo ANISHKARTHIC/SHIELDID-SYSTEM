@@ -17,13 +17,20 @@ def detect_face(image_bytes: bytes) -> bool:
         if face_provider and face_provider.app:
             faces = face_provider.app.get(img)
             return len(faces) > 0
-            
-        # Fallback to true if model is somehow not loaded
-        return True
+
+        # Model not loaded: we cannot confirm a face is present, so fail
+        # closed. This gates "does this document have a face photo on it" —
+        # failing open here would mean any environment where InsightFace
+        # fails to initialize (missing GPU/CUDA lib, OOM, corrupt model
+        # cache) silently accepts every image as a valid ID document with
+        # no face check at all, for the lifetime of that failure.
+        import logging
+        logging.getLogger("classifier").error("Face provider not loaded; failing closed (no face detected)")
+        return False
     except Exception as e:
         import logging
         logging.getLogger("classifier").error(f"Error detecting face with InsightFace: {e}")
-        return True # Fallback to let it proceed rather than blocking incorrectly
+        return False # Fail closed: an error here means we can't confirm a face is present
 
 def classify_document_real(image_bytes: bytes) -> dict:
     """

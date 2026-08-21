@@ -21,8 +21,15 @@ class OccupancyService:
             .count()
         )
 
-    def check_out(self, db: Session, occupancy_id: int, checked_out_by_id: int) -> Optional[Occupancy]:
-        record = db.query(Occupancy).filter(Occupancy.id == occupancy_id).first()
+    def check_out(self, db: Session, occupancy_id: int, checked_out_by_id: int, venue_id: int) -> Optional[Occupancy]:
+        # venue_id scoping matches check_out_by_customer below — without
+        # it, any door_staff+ operator could force-checkout another
+        # venue's occupant by guessing/incrementing occupancy_id, since
+        # occupancy IDs are plain sequential integers with no per-venue
+        # namespace.
+        record = db.query(Occupancy).filter(
+            Occupancy.id == occupancy_id, Occupancy.venue_id == venue_id
+        ).first()
         if not record:
             return None
         if record.exited_at is not None:

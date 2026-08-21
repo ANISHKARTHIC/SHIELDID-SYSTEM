@@ -4,13 +4,19 @@ import '../../../../core/network/dio_client.dart';
 class RemoteDataSource {
   final Dio _dio = DioClient().dio;
 
-  // classifyDocument/extractOCR/verifyFace are the three calls that
-  // actually invoke AI inference server-side — the backend allows up to
-  // 180s for each of these specifically (see backend/api/v1_router.py),
-  // well beyond DioClient's general-purpose default, since a t3.micro
-  // deployment's ai-service can be slow to respond while its model
-  // weights page back in from swap after any idle period.
-  static const _aiCallTimeout = Duration(seconds: 190);
+  /// classify/ocr/face-match all run real CPU-bound ML inference
+  /// (EasyOCR/InsightFace) server-side — the backend itself allows up to
+  /// 180s for each of these when calling ai-service (v1_router.py), but
+  /// the shared DioClient default is only 15s (tuned for fast JSON
+  /// endpoints). A cold-start EasyOCR model load, or just slower CPU-only
+  /// inference — especially on a t3.micro deployment where the ai-service
+  /// can be slow to respond while its model weights page back in from
+  /// swap after any idle period — can easily exceed 15s without being a
+  /// real failure. These three calls get their own longer receive timeout
+  /// (190s, just past the backend's own 180s budget so the backend's own
+  /// timeout fires first) to match; every other (fast) endpoint keeps the
+  /// shared client's 15s default.
+  static const _inferenceTimeout = Duration(seconds: 190);
 
   Future<Map<String, dynamic>> login(String email, String password) async {
     final response = await _dio.post(
@@ -59,10 +65,7 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/classify',
       data: formData,
-      options: Options(
-        sendTimeout: _aiCallTimeout,
-        receiveTimeout: _aiCallTimeout,
-      ),
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );
     return response.data;
   }
@@ -77,10 +80,7 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/ocr',
       data: formData,
-      options: Options(
-        sendTimeout: _aiCallTimeout,
-        receiveTimeout: _aiCallTimeout,
-      ),
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );
     return response.data;
   }
@@ -98,10 +98,7 @@ class RemoteDataSource {
     final response = await _dio.post(
       '/session/$sessionId/face',
       data: formData,
-      options: Options(
-        sendTimeout: _aiCallTimeout,
-        receiveTimeout: _aiCallTimeout,
-      ),
+      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );
     return response.data;
   }
@@ -125,8 +122,11 @@ class RemoteDataSource {
     return response.data;
   }
 
-  Future<List<dynamic>> getHistory() async {
-    final response = await _dio.get('/sessions/history');
+  Future<List<dynamic>> getHistory({int? limit}) async {
+    final response = await _dio.get(
+      '/sessions/history',
+      queryParameters: limit != null ? {'limit': limit} : null,
+    );
     return response.data as List<dynamic>;
   }
 

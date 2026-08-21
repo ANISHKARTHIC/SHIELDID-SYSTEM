@@ -12,7 +12,11 @@ def _finalize_pass_session(headers, unique_id, name):
     start_res = client.post("/api/v1/session/start", headers=headers)
     session_id = start_res.json()["session_id"]
     session_state = {
-        "step": 3,
+        # step 4 = face-verify step completed, matching what the real
+        # /session/{id}/face endpoint sets — finalize_session now requires
+        # this before honoring a "pass" decision (a session can no longer
+        # be approved without ever having gone through face verification).
+        "step": 4,
         "status": "ready",
         "session_id": session_id,
         "ocr": {

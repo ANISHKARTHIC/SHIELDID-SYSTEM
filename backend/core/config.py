@@ -43,10 +43,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    # URL the backend uses to reach the AI microservice. In AWS this should
-    # be the internal service-discovery/ALB address (e.g. ECS Cloud Map DNS
-    # or an internal load balancer DNS name), not localhost.
-    AI_SERVICE_URL: str = "http://ai-service:8001"
+    # URL the backend uses to reach the AI microservice. Defaults to
+    # localhost for local dev (matches start_ai_service.sh). docker-compose
+    # sets this explicitly to http://ai-service:8001 (the compose network
+    # service name) via the backend service's environment block — in AWS
+    # behind ECS this should be the internal service-discovery/ALB address
+    # (e.g. ECS Cloud Map DNS or an internal load balancer DNS name).
+    AI_SERVICE_URL: str = "http://localhost:8001"
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

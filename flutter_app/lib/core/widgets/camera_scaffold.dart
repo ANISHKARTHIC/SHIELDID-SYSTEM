@@ -26,6 +26,7 @@ class CameraCaptureScaffold extends StatefulWidget {
   final bool isProcessing;
   final String? processingStatusText;
   final VoidCallback? onCancelProcessing;
+  final VoidCallback? onSwitchCamera;
 
   const CameraCaptureScaffold({
     super.key,
@@ -45,6 +46,7 @@ class CameraCaptureScaffold extends StatefulWidget {
     this.isProcessing = false,
     this.processingStatusText,
     this.onCancelProcessing,
+    this.onSwitchCamera,
   });
 
   @override
@@ -66,42 +68,97 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
   @override
   Widget build(BuildContext context) {
     if (widget.isInitializing || widget.controller == null) {
+      // errorText is checked even while "initializing"/controller-less:
+      // a camera that fails to start (first load, or a failed switch)
+      // previously fell straight through to this branch's plain spinner
+      // forever, with no close button and no way out — the caller had to
+      // be mid-error internally to escape, since this branch never looked
+      // at errorText at all. Now a failure shows the same close button
+      // and error banner as the ready state, and offers Upload from
+      // Gallery as a fallback so the operator isn't blocked entirely.
+      final hasError = widget.errorText != null;
       return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
+        body: SafeArea(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 56,
-                height: 56,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(
-                  Icons.camera_alt_rounded,
-                  color: Colors.white,
-                  size: 26,
+              Align(
+                alignment: Alignment.topLeft,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                  onPressed: widget.onClose,
                 ),
               ),
-              const SizedBox(height: 20),
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Starting camera…',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 56,
+                          height: 56,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: (hasError ? context.colors.danger : Colors.white)
+                                .withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Icon(
+                            hasError
+                                ? Icons.error_outline_rounded
+                                : Icons.camera_alt_rounded,
+                            color: hasError ? context.colors.danger : Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        if (!hasError) ...[
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          const Text(
+                            'Starting camera…',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ] else ...[
+                          Text(
+                            widget.errorText!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              widget.onPickFromGallery();
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white38),
+                            ),
+                            icon: const Icon(Icons.photo_library),
+                            label: const Text('Upload from Gallery'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -175,16 +232,15 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                   Row(
                     children: [
                       if (!widget.isProcessing)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.white,
-                            size: 28,
-                          ),
+                        _CircleIconButton(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Close',
+                          diameter: 44,
+                          iconSize: 22,
                           onPressed: widget.onClose,
                         )
                       else
-                        const SizedBox(width: 48),
+                        const SizedBox(width: 44),
                       Expanded(
                         child: VerifyStepIndicator(
                           currentStep: widget.currentStep,
@@ -193,6 +249,19 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                           activeColor: Colors.white,
                         ),
                       ),
+                      if (widget.onSwitchCamera != null && !widget.isProcessing)
+                        _CircleIconButton(
+                          icon: Icons.cameraswitch_rounded,
+                          tooltip: 'Switch camera',
+                          diameter: 44,
+                          iconSize: 20,
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            widget.onSwitchCamera!();
+                          },
+                        )
+                      else
+                        const SizedBox(width: 44),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -270,40 +339,53 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
             ),
           ),
 
-          // Bottom controls.
+          // Bottom controls: the shutter is pinned to the true horizontal
+          // center via Stack + Center (not affected by anything else in
+          // the row), and the gallery button is positioned independently
+          // relative to the screen edge. The previous Row-based layout
+          // paired an Align(centerRight)-wrapped gallery button on the
+          // left with an unaligned bare SizedBox spacer on the right —
+          // those aren't equivalent, so the shutter was visibly off-center
+          // (shifted toward the gallery side) instead of centered.
           if (!widget.isProcessing)
             SafeArea(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 28),
+                child: SizedBox(
+                  height: 76,
+                  child: Stack(
+                    alignment: Alignment.center,
                     children: [
-                      const SizedBox(width: 60),
                       GestureDetector(
                         onTap: _handleCapture,
                         child: Container(
-                          width: 80,
-                          height: 80,
+                          width: 76,
+                          height: 76,
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 4),
-                            color: Colors.white.withValues(alpha: 0.3),
+                          ),
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
-                      IconButton(
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          widget.onPickFromGallery();
-                        },
-                        icon: const Icon(
-                          Icons.photo_library,
-                          color: Colors.white,
-                          size: 36,
+                      Positioned(
+                        left: 32,
+                        child: _CircleIconButton(
+                          icon: Icons.photo_library_rounded,
+                          tooltip: 'Upload from Gallery',
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            widget.onPickFromGallery();
+                          },
                         ),
-                        tooltip: 'Upload from Gallery',
                       ),
                     ],
                   ),
@@ -351,6 +433,51 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A softly-backed circular icon button used for the top-bar (close,
+/// switch camera) and bottom-bar (upload from gallery) controls —
+/// replaces plain unbacked IconButtons with a filled circle so each reads
+/// as a tappable control against the live camera preview instead of a
+/// bare icon with poor contrast on bright backgrounds.
+class _CircleIconButton extends StatelessWidget {
+  /// Default diameter, also used as the balancing spacer's width in the
+  /// bottom control row so the shutter button stays visually centered.
+  static const double defaultDiameter = 52;
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final double diameter;
+  final double iconSize;
+
+  const _CircleIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.diameter = defaultDiameter,
+    this.iconSize = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.16),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: diameter,
+            height: diameter,
+            child: Icon(icon, color: Colors.white, size: iconSize),
+          ),
+        ),
       ),
     );
   }

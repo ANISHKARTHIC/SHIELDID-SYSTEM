@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'decision_view.dart';
 import '../../data/datasources/remote_data_source.dart';
@@ -23,7 +24,10 @@ class FaceCaptureView extends StatefulWidget {
 
 class _FaceCaptureViewState extends State<FaceCaptureView> {
   CameraController? _controller;
+  List<CameraDescription> _cameras = [];
+  int _selectedCameraIndex = 0;
   bool _isCameraInitialized = false;
+  bool _isSwitchingCamera = false;
   bool _isProcessing = false;
   String? _error;
 
@@ -53,32 +57,73 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       }
       return;
     }
+    _cameras = cameras;
 
-    CameraDescription? frontCamera;
-    for (var camera in cameras) {
-      if (camera.lensDirection == CameraLensDirection.front) {
-        frontCamera = camera;
-        break;
-      }
+    // Default to the back camera: it captures a sharper, better-lit photo
+    // than most phones' front/selfie camera, which improves face-match
+    // accuracy. A switch button lets the user swap to the front camera
+    // when they can't comfortably hold the phone facing away from them.
+    int backIndex = cameras.indexWhere(
+      (c) => c.lensDirection == CameraLensDirection.back,
+    );
+    _selectedCameraIndex = backIndex >= 0 ? backIndex : 0;
+
+    await _startCamera(_cameras[_selectedCameraIndex]);
+  }
+
+  Future<void> _startCamera(CameraDescription description) async {
+    // The old controller's native camera session must be fully closed
+    // before opening a new one — most Android/iOS camera hardware only
+    // allows a single active session at a time, so starting the new
+    // controller while the previous one is still open throws a
+    // CameraException on the new session (confirmed failure mode: the
+    // switch button's target camera "not opening" on real devices). The
+    // previous code disposed the old controller only *after* the new one
+    // successfully initialized, which is backwards.
+    final previous = _controller;
+    if (mounted) {
+      setState(() {
+        // Drop the reference before disposing so CameraPreview never holds
+        // a disposed controller while we're between cameras.
+        _controller = null;
+      });
     }
-    frontCamera ??= cameras.first;
+    await previous?.dispose();
 
-    _controller = CameraController(
-      frontCamera,
+    final newController = CameraController(
+      description,
       ResolutionPreset.high,
       enableAudio: false,
     );
 
     try {
-      await _controller!.initialize();
-      if (mounted) setState(() => _isCameraInitialized = true);
-    } catch (e) {
+      await newController.initialize();
       if (mounted) {
-        setState(
-          () => _error = 'Could not start the camera. Please try again.',
-        );
+        setState(() {
+          _controller = newController;
+          _isCameraInitialized = true;
+          _isSwitchingCamera = false;
+        });
+      }
+    } catch (e) {
+      await newController.dispose();
+      if (mounted) {
+        setState(() {
+          _isSwitchingCamera = false;
+          _error = 'Could not start the camera. Please try again.';
+        });
       }
     }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2 || _isSwitchingCamera) return;
+    setState(() {
+      _isSwitchingCamera = true;
+      _error = null;
+    });
+    _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras.length;
+    await _startCamera(_cameras[_selectedCameraIndex]);
   }
 
   @override
@@ -140,7 +185,17 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Could not verify identity. Please try again.';
+          // Face matching runs real ML inference server-side and can
+          // legitimately take a while (cold-started model, CPU-only
+          // backend) — a timeout isn't the same failure as an actual
+          // match/verification error, so it gets its own message.
+          final isTimeout = e is DioException &&
+              (e.type == DioExceptionType.receiveTimeout ||
+                  e.type == DioExceptionType.sendTimeout ||
+                  e.type == DioExceptionType.connectionTimeout);
+          _error = isTimeout
+              ? 'The verification service is taking longer than usual. Please try again.'
+              : 'Could not verify identity. Please try again.';
           _isProcessing = false;
         });
       }
@@ -171,7 +226,7 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
   Widget build(BuildContext context) {
     return CameraCaptureScaffold(
       controller: _controller,
-      isInitializing: !_isCameraInitialized,
+      isInitializing: !_isCameraInitialized || _isSwitchingCamera,
       isOvalGuide: true,
       guideWidthFactor: 0.7,
       guideHeightFactor: 0.9,
@@ -183,6 +238,7 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
       onCapture: _takePicture,
       onPickFromGallery: _pickImage,
       onClose: () => Navigator.pop(context),
+      onSwitchCamera: _cameras.length > 1 ? _switchCamera : null,
       isProcessing: _isProcessing,
       processingStatusText: 'Verifying identity…',
     );

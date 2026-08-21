@@ -28,12 +28,12 @@ pub-entry/
 │   │   └── main.py         # Entry point for backend orchestrator (Port 8000)
 │   └── venv/               # Backend python environment
 │
-├── frontend/
-│   └── frontend/           # Next.js (React) - Security Gate Dashboard
-│       ├── src/
-│       │   ├── app/        # Next.js pages & app layout (Dashboard, Visitors, Incidents)
-│       │   └── lib/        # State store (Zustand) & API connection utilities
-│       └── package.json
+├── frontend/                # Next.js (React) - Security Gate Dashboard
+│   ├── src/
+│   │   ├── app/             # Next.js pages & app layout (Dashboard, Visitors, Incidents)
+│   │   └── lib/             # State store (Zustand) & API connection utilities
+│   ├── vercel.json          # Vercel deployment config (see "Vercel Deployment" below)
+│   └── package.json
 │
 ├── docker-compose.yml      # Docker services (PostgreSQL & Redis)
 └── pub_entry.db            # SQLite database file (Local development storage)
@@ -77,7 +77,7 @@ If `/ready` reports `ai_service` as an error, ai-service either isn't running or
 ### 4. Next.js Gate Dashboard (`frontend`)
 This client dashboard interfaces with the backend and runs the user interface on port `3000`.
 ```bash
-cd frontend/frontend
+cd frontend
 cp .env.example .env   # if you haven't already — sets NEXT_PUBLIC_API_URL
 npm run dev
 ```
@@ -98,11 +98,14 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 *   **Microtext & Text Texture (High-Frequency Details):** Runs a Laplacian variance filter over text areas to detect blurry desktop printing versus sharp laser engraving.
 *   **Print Quality (Lithographic vs. Desktop):** Employs Gaussian Blur subtraction to identify pixel dithering and print banding.
 
+### 3. Adaptive Image Sizing (`resize_image_for_ai`)
+Every image handed to `ai-service`'s `/classify`, `/ocr`, and `/face-match` endpoints (`ai-service/app/services/image_utils.py`) is downscaled — if larger — to a 1280px longest side before any inference runs. This isn't a memory-survival hack (that's what `main`'s branch-specific 1024px cap is for on a t3.micro); on `high-power` it exists purely for latency: EasyOCR's text detector scales roughly linearly with pixel count, so a full 12MP phone photo (4032×3024) takes ~12s to OCR versus ~2s at 1280px — with no measurable loss in extracted-text accuracy, since 1280px is comfortably above what's needed to keep UK licence/passport text legible. InsightFace face detection is unaffected either way (it internally letterboxes to its own `det_size` regardless of input resolution), so this change is purely a speed win with no accuracy trade-off on the face-matching side.
+
 ---
 
 ## 🚀 Production Deployment (Docker Compose on EC2)
 
-**`main` is tuned for a t3.micro free-tier demo box — this is the branch actually deployed and public-facing.** The [`high-power`](../../tree/high-power) branch carries the accurate, full-power settings (`buffalo_l` InsightFace, generous per-service memory limits) for a real t3.medium+ instance — use it for anything beyond a free-tier demo. The two branches intentionally carry different `docker-compose.yml`/`ai-service/Dockerfile` tuning; don't merge one's sizing into the other.
+**`main` is tuned for a t3.micro free-tier demo box — this is the branch actually deployed and public-facing.** The [`high-power`](../../tree/high-power) branch carries the accurate, full-power settings (`buffalo_l` InsightFace, generous per-service memory limits) for a real t3.medium+ instance (`t3.medium`, `c7i.large`, `m7i-flex.large`, or similar) — use it for anything beyond a free-tier demo. The two branches intentionally carry different `docker-compose.yml`/`ai-service/Dockerfile` tuning; don't merge one's sizing into the other.
 
 `db`, `redis`, `ai-service`, `backend`, and `frontend` run as containers defined in the root `docker-compose.yml`. Verification images go straight to real **S3** — there is no local object-storage container to run or back up.
 
@@ -114,10 +117,10 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 - **Expect it to be slow.** The first request after a cold start (or after any idle period long enough for pages to get swapped back out) will be noticeably slower while model weights page back in from swap. This is the accepted trade-off for running real inference on free-tier hardware, not a bug — if you see `/ready` report `"ai_service": "error: ..."` immediately after starting the stack, that's very likely still-loading, not broken; give it a couple of minutes and retry before assuming something's wrong.
 - Launch with [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh).
 
-### `high-power` branch: t3.medium (2 vCPU / 4GB RAM) — the accurate deployment
-Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; a 2GB swap file (provisioned by [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh)) is a backstop for transient spikes, not something the stack is expected to lean on. `ai-service` uses the full `buffalo_l` pack at 640px and isn't memory-starved the way `main`'s demo build is.
+### `high-power` branch: 2 vCPU / 4GB+ RAM — the accurate deployment
+Total container memory limits (~3.1GB) leave headroom under 4GB for the host OS and Docker daemon; on `t3.medium` a 2GB swap file (provisioned by [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh)) is a backstop for transient spikes, not something the stack is expected to lean on. On a non-burstable type with 4GB+ RAM (`c7i.large`, `m7i-flex.large`) swap matters even less — there's no CPU-credit throttling to work around either. `ai-service` uses the full `buffalo_l` pack at 640px and isn't memory-starved the way `main`'s demo build is.
 
-t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to threads via `OMP_NUM_THREADS`/`ORT_NUM_THREADS` (2 on `high-power`, 1 on `main`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly on `high-power`, move to a `t3.unlimited` mode instance or a non-burstable type (`m6i.large`) — the compose file and resource limits do not need to change.
+t2/t3 instances are burstable — CPU credits, not just RAM, are the constraint. `ai-service` is pinned to threads via `OMP_NUM_THREADS`/`ORT_NUM_THREADS` (2 on `high-power`, 1 on `main`) so a single OCR/face-match request can't burn the whole credit balance and starve the API. If sustained verification volume is high enough to exhaust CPU credits regularly on `high-power`, move to a non-burstable type instead — **`c7i.large`** (compute-optimized, higher sustained clock speed, best fit for this CPU-bound OCR/face-match workload) or `m7i-flex.large` (more RAM headroom if you'd rather not think about memory at all) both work with this exact `docker-compose.yml` unmodified — same 2 vCPU, same thread pinning, no config changes needed either way.
 
 The rest of this section (S3 setup, secrets, verification) applies to both branches identically — only the instance type/user-data script and the two files called out above differ.
 
@@ -147,10 +150,10 @@ Verification images are keyed into two prefixes inside the one bucket, not two b
 Because it's a prefix split within one bucket rather than two buckets, a bulk "wipe everything routine" operation is just `aws s3 rm s3://<bucket>/scans/unflagged/ --recursive` — `scans/flagged/` is structurally untouched by that command.
 
 ### 2. Launch the EC2 instance
-- **Type**: on `main`, `t3.micro` (free-tier eligible), ≥20GB gp2/gp3 root volume; on `high-power`, `t3.medium`, ≥30GB gp3 (the `ai-service` image with baked-in model weights is large either way).
+- **Type**: on `main`, `t3.micro` (free-tier eligible), ≥20GB gp2/gp3 root volume; on `high-power`, `t3.medium`, `c7i.large`, or `m7i-flex.large` (all 2 vCPU / 4GB+ RAM, all validated against that branch's `docker-compose.yml`), ≥30GB gp3 root volume (the `ai-service` image with baked-in model weights is large either way).
 - **IAM instance profile**: `venuepass-ec2-profile` from step 1.
 - **Security group**: 22 (SSH, your IP only), 80/443 if fronting with a reverse proxy (recommended, see step 5) or 3000/8000 directly otherwise. Nothing else public — `docker-compose.yml` binds Postgres/Redis/ai-service to `127.0.0.1` so they're unreachable outside the box regardless.
-- **User data**: on `main`, paste [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh); on `high-power`, paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top of either first). Both install Docker, add a swap file (4GB on `main`, 2GB on `high-power`), clone the repo, and register a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
+- **User data**: on `main`, paste [`deploy/aws/ec2-user-data-t3micro.sh`](deploy/aws/ec2-user-data-t3micro.sh); on `high-power`, paste [`deploy/aws/ec2-user-data.sh`](deploy/aws/ec2-user-data.sh) (edit `REPO_URL` at the top of either first). Both install Docker, add a swap file (4GB on `main`, 2GB on `high-power`, harmless but unnecessary on `c7i.large`/`m7i-flex.large`), clone the repo, and register a `venuepass.service` systemd unit so the stack restarts automatically after a reboot or `docker compose down`.
 
 ### 3. Configure secrets
 SSH in and finish the `.env` the bootstrap script generated:
@@ -186,7 +189,7 @@ yourdomain.com {
     reverse_proxy /* localhost:3000
 }
 ```
-Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same t3.medium alongside the compose stack.
+Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same instance alongside the compose stack.
 
 ### Notes
 - **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires `scans/unflagged/` objects after 7 days regardless — flagged customers' images (`scans/flagged/`) are exempt from both the cron and the lifecycle rule, by design.
@@ -199,7 +202,7 @@ Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy it
 
 ## ☁️ Alternative: ECS/Fargate + RDS (multi-instance scale-out)
 
-The single-VM t3.medium setup above is the recommended starting point. If verification volume outgrows one instance, `backend` and `ai-service` are two independently deployable, stateless containers (each has its own `Dockerfile`) that fit ECS/Fargate services behind an ALB, with managed AWS services standing in for the containers that only exist for convenience in `docker-compose.yml` (`db` → RDS, `redis` → ElastiCache). S3 setup is identical to step 1 above — the same bucket and IAM policy work for both deployment styles.
+The single-VM setup above is the recommended starting point. If verification volume outgrows one instance, `backend` and `ai-service` are two independently deployable, stateless containers (each has its own `Dockerfile`) that fit ECS/Fargate services behind an ALB, with managed AWS services standing in for the containers that only exist for convenience in `docker-compose.yml` (`db` → RDS, `redis` → ElastiCache). S3 setup is identical to step 1 above — the same bucket and IAM policy work for both deployment styles.
 
 ### 1. S3 (object storage for verification images)
 ```bash
@@ -247,4 +250,15 @@ REDIS_URL=redis://your-cluster.xxxx.cache.amazonaws.com:6379/0
 Put `SECRET_KEY`, `POSTGRES_PASSWORD`/`DATABASE_URL`, and `REDIS_URL` in AWS Secrets Manager or SSM Parameter Store and reference them from the ECS task definition's `secrets` block — do not bake them into the image or set them as plain task-definition environment variables.
 
 ### 5. Frontend
-Deploy the Next.js frontend to its own ECS service (or Amplify/CloudFront+S3 for a purely static export) with `NEXT_PUBLIC_API_URL` set to the backend ALB's public HTTPS URL at **build** time.
+
+#### Vercel (recommended)
+The `frontend/` directory is a standard Next.js app with a `vercel.json` already checked in — Vercel auto-detects the framework, so deploying is:
+1. Import the repo into a new Vercel project.
+2. Set **Root Directory** to `frontend` in the project's Settings (this repo has multiple services at the root, so Vercel needs to know which subdirectory to build).
+3. Add the `NEXT_PUBLIC_API_URL` environment variable (Project Settings → Environment Variables) pointing at the backend's public HTTPS URL — e.g. `https://api.yourdomain.com/api/v1`. This is baked in at **build** time (`src/lib/api.ts`'s `getApiBase()`), so changing it later requires a redeploy, not just a restart.
+4. Push to the connected branch — Vercel builds and deploys automatically from there on.
+
+`next.config.ts`'s `output: "standalone"` (needed for the Docker path below) is automatically skipped on Vercel via its own `VERCEL` environment variable, so no config changes are needed between the two paths.
+
+#### Self-hosted (Docker / ECS)
+Deploy the Next.js frontend to its own ECS service (or Amplify/CloudFront+S3 for a purely static export) using `frontend/Dockerfile`, with `NEXT_PUBLIC_API_URL` set to the backend ALB's public HTTPS URL at **build** time.
