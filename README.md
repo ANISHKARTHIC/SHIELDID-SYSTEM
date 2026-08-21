@@ -98,6 +98,9 @@ We evaluate 2D images for signs of a "Fake Licence" based on 3 distinct visual m
 *   **Microtext & Text Texture (High-Frequency Details):** Runs a Laplacian variance filter over text areas to detect blurry desktop printing versus sharp laser engraving.
 *   **Print Quality (Lithographic vs. Desktop):** Employs Gaussian Blur subtraction to identify pixel dithering and print banding.
 
+### 3. Adaptive Image Sizing (`resize_image_for_ai`)
+Every image handed to `ai-service`'s `/classify`, `/ocr`, and `/face-match` endpoints (`ai-service/app/services/image_utils.py`) is downscaled — if larger — to a 1280px longest side before any inference runs. This isn't a memory-survival hack (that's what `main`'s branch-specific 1024px cap is for on a t3.micro); on `high-power` it exists purely for latency: EasyOCR's text detector scales roughly linearly with pixel count, so a full 12MP phone photo (4032×3024) takes ~12s to OCR versus ~2s at 1280px — with no measurable loss in extracted-text accuracy, since 1280px is comfortably above what's needed to keep UK licence/passport text legible. InsightFace face detection is unaffected either way (it internally letterboxes to its own `det_size` regardless of input resolution), so this change is purely a speed win with no accuracy trade-off on the face-matching side.
+
 ---
 
 ## 🚀 Production Deployment (Docker Compose on EC2, 2 vCPU / 4GB+ RAM)
