@@ -62,31 +62,16 @@ class TestSessionVenueIsolation(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 404)
 
-    def test_cross_venue_ocr_returns_404(self):
+    def test_cross_venue_scan_returns_404(self):
         start_res = client.post("/api/v1/session/start", headers=self.headers)
         session_id = start_res.json()["session_id"]
 
         res = client.post(
-            f"/api/v1/session/{session_id}/ocr",
+            f"/api/v1/session/{session_id}/scan",
             files={"file": ("id.jpg", b"fake-image-bytes", "image/jpeg")},
             headers=self.other_headers,
         )
         self.assertEqual(res.status_code, 404)
-
-    def test_own_venue_session_still_accessible(self):
-        # Sanity check: the venue guard doesn't break the normal same-venue
-        # path — a step-order 400 (not a venue-check 404) is expected here
-        # since no /classify has run yet.
-        start_res = client.post("/api/v1/session/start", headers=self.headers)
-        session_id = start_res.json()["session_id"]
-
-        res = client.post(
-            f"/api/v1/session/{session_id}/ocr",
-            files={"file": ("id.jpg", b"fake-image-bytes", "image/jpeg")},
-            headers=self.headers,
-        )
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("classified", res.json()["detail"])
 
 
 class TestFinalizeRequiresFaceStep(unittest.TestCase):

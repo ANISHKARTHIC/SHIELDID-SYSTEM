@@ -339,64 +339,85 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
             ),
           ),
 
-          // Bottom controls: the shutter is pinned to the true horizontal
-          // center of the full screen width via Positioned.fill + Center
-          // inside the Stack, not affected by the gallery button. The
-          // previous attempt wrapped this in a plain SizedBox(height: 76)
-          // with no width — a Stack with no incoming width constraint and
-          // a non-Positioned child (the shutter GestureDetector) shrinks
-          // to fit its children instead of filling the screen, so
-          // Alignment.center was centering within a narrow box, not the
-          // real screen width, and the Positioned(left: 32) gallery button
-          // skewed the effective bounds further — both combined to
-          // visibly shift the shutter left of true center on-device.
+          // Bottom control bar: a solid dark bar pinned to the true
+          // bottom of the screen (Positioned.fill + Align, independent of
+          // guide-frame sizing above it), like a native camera app's
+          // control strip — not a button floating directly over the live
+          // preview. A previous version placed the shutter only 28px above
+          // the screen edge with no real background of its own, which on
+          // some guide-frame proportions (tall guideHeightFactor, or a
+          // shorter device) visually read as sitting inside/near the
+          // framed capture area instead of in a clearly separate bottom
+          // zone — this gives it its own dedicated space and backdrop so
+          // it unambiguously reads as "the bottom of the screen."
           if (!widget.isProcessing)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 28),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 76,
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: GestureDetector(
-                          onTap: _handleCapture,
-                          child: Container(
-                            width: 76,
-                            height: 76,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 4),
-                            ),
-                            child: Container(
-                              width: 60,
-                              height: 60,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.0),
+                      Colors.black.withValues(alpha: 0.75),
+                    ],
+                  ),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 32, bottom: 20),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 76,
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: GestureDetector(
+                              onTap: _handleCapture,
+                              child: Container(
+                                width: 76,
+                                height: 76,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 4,
+                                  ),
+                                ),
+                                child: Container(
+                                  width: 60,
+                                  height: 60,
+                                  decoration: const BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.white,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 32,
-                        top: 0,
-                        bottom: 0,
-                        child: Center(
-                          child: _CircleIconButton(
-                            icon: Icons.photo_library_rounded,
-                            tooltip: 'Upload from Gallery',
-                            onPressed: () {
-                              HapticFeedback.selectionClick();
-                              widget.onPickFromGallery();
-                            },
+                          Positioned(
+                            left: 32,
+                            top: 0,
+                            bottom: 0,
+                            child: Center(
+                              child: _CircleIconButton(
+                                icon: Icons.photo_library_rounded,
+                                tooltip: 'Upload from Gallery',
+                                onPressed: () {
+                                  HapticFeedback.selectionClick();
+                                  widget.onPickFromGallery();
+                                },
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),

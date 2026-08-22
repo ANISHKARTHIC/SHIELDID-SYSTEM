@@ -50,7 +50,18 @@ class RemoteDataSource {
     return response.data;
   }
 
-  Future<Map<String, dynamic>> classifyDocument(
+  /// Combines the classify and OCR steps into a single upload — the photo
+  /// used to be sent twice as two sequential requests (classify, then
+  /// OCR), each a full network round-trip plus its own server-side
+  /// inference pass. Since OCR's document-type routing comes directly
+  /// from classify's own result, there's no real reason that had to be
+  /// two separate client round-trips; the backend now does both in one
+  /// call (backend/api/v1_router.py's /scan endpoint). Response shape
+  /// matches the old /ocr endpoint's ({success, extracted_data,
+  /// validation}), with success:false + message for a rejected document
+  /// (matching the old /classify rejection shape) when the document isn't
+  /// a valid ID.
+  Future<Map<String, dynamic>> scanDocument(
     String sessionId,
     String imagePath,
   ) async {
@@ -58,22 +69,7 @@ class RemoteDataSource {
     final formData = FormData.fromMap({'file': file});
 
     final response = await _dio.post(
-      '/session/$sessionId/classify',
-      data: formData,
-      options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
-    );
-    return response.data;
-  }
-
-  Future<Map<String, dynamic>> extractOCR(
-    String sessionId,
-    String imagePath,
-  ) async {
-    final file = await MultipartFile.fromFile(imagePath, filename: 'id.jpg');
-    final formData = FormData.fromMap({'file': file});
-
-    final response = await _dio.post(
-      '/session/$sessionId/ocr',
+      '/session/$sessionId/scan',
       data: formData,
       options: Options(receiveTimeout: _inferenceTimeout, sendTimeout: _inferenceTimeout),
     );

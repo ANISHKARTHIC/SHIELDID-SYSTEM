@@ -90,27 +90,22 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     });
     try {
       final remoteData = RemoteDataSource();
-      final classifyResult = await remoteData.classifyDocument(
+      final result = await remoteData.scanDocument(
         widget.sessionId,
         widget.imagePath,
       );
 
-      if (classifyResult['success'] == false) {
+      if (result['success'] == false) {
         if (mounted) {
           setState(() {
             _error =
-                classifyResult['message'] ??
+                result['message'] ??
                 'Document rejected by AI (Not a valid ID).';
             _isLoading = false;
           });
         }
         return;
       }
-
-      final result = await remoteData.extractOCR(
-        widget.sessionId,
-        widget.imagePath,
-      );
 
       final extracted = result['extracted_data'];
       // uk_driving_licence responses carry surname/first_names already
