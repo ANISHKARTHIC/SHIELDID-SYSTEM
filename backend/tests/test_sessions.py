@@ -19,9 +19,9 @@ class TestSessionEndpoints(unittest.TestCase):
     def test_face_before_ocr_returns_400_not_500(self):
         # Regression: /session/{id}/face used to read session_data["ocr"]
         # unconditionally, which raised a raw KeyError (surfaced as an
-        # opaque 500) if called before /ocr ever ran. Every other
-        # step-order violation in this flow (e.g. /ocr before /classify)
-        # already returns a clean 400 — /face should too.
+        # opaque 500) if called before /session/{id}/scan (classify+OCR
+        # combined) ever ran. Every other step-order violation in this
+        # flow already returns a clean 400 — /face should too.
         from backend.db.redis import get_redis
         start_res = client.post("/api/v1/session/start", headers=self.headers)
         session_id = start_res.json()["session_id"]
@@ -35,6 +35,99 @@ class TestSessionEndpoints(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("OCR", response.json()["detail"])
+
+    def test_scan_combines_classify_and_ocr_in_one_call(self):
+        # Regression: /classify and /ocr used to be two separate endpoints
+        # requiring two separate client uploads of the same photo. /scan
+        # combines them server-side into a single call — this verifies the
+        # merged endpoint calls ai-service's /classify then /ocr in that
+        # order (routing OCR's document_type from classify's own result),
+        # and lands the session on step 3 (matching the old /ocr
+        # endpoint's final step), same as before the merge.
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+
+        classify_payload = {
+            "is_valid": True,
+            "document_type": "uk_driving_licence",
+            "type_confidence": 0.95,
+        }
+        ocr_payload = {
+            "extracted_data": {
+                "document_number": "SMITH901018AB9IJ",
+                "name": "JOHN SMITH",
+                "dob": "1990-01-01",
+                "confidence": 92.0,
+            },
+            "validation": {"is_valid": True, "errors": []},
+        }
+
+        calls = []
+
+        async def fake_post(self, url, **kwargs):
+            calls.append(url)
+            response = MagicMock()
+            response.status_code = 200
+            if url.endswith("/classify"):
+                response.json = lambda: classify_payload
+            elif url.endswith("/ocr"):
+                response.json = lambda: ocr_payload
+            return response
+
+        with patch("httpx.AsyncClient.post", new=fake_post):
+            res = client.post(
+                f"/api/v1/session/{session_id}/scan",
+                files={"file": ("id.jpg", b"fake-image-bytes", "image/jpeg")},
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["extracted_data"]["document_number"], "SMITH901018AB9IJ")
+        # classify must be called before ocr — ocr's document_type routing
+        # depends on classify's result being available first.
+        self.assertTrue(calls[0].endswith("/classify"))
+        self.assertTrue(calls[1].endswith("/ocr"))
+
+        from backend.db.redis import get_redis
+        session_data = json.loads(next(get_redis()).get(f"session:{session_id}"))
+        self.assertEqual(session_data["step"], 3)
+        self.assertEqual(session_data["classification"]["document_type"], "uk_driving_licence")
+
+    def test_scan_rejects_document_without_classifying(self):
+        # A document that fails classification (no face detected, etc.)
+        # must short-circuit before OCR ever runs — same behavior as the
+        # old two-endpoint flow's /classify rejection.
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+
+        calls = []
+
+        async def fake_post(self, url, **kwargs):
+            calls.append(url)
+            response = MagicMock()
+            response.status_code = 200
+            response.json = lambda: {
+                "is_valid": False,
+                "reason": "No face detected on the document.",
+            }
+            return response
+
+        with patch("httpx.AsyncClient.post", new=fake_post):
+            res = client.post(
+                f"/api/v1/session/{session_id}/scan",
+                files={"file": ("id.jpg", b"fake-image-bytes", "image/jpeg")},
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertFalse(data["success"])
+        self.assertEqual(data["message"], "No face detected on the document.")
+        # OCR must never be called for a rejected document.
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].endswith("/classify"))
 
     def test_operator_stats(self):
         # Start a session

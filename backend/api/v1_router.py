@@ -61,15 +61,27 @@ async def get_operator_stats(
         "flagged": flagged
     }
 
-@router.post("/session/{session_id}/classify")
-async def classify_document(
+@router.post("/session/{session_id}/scan")
+async def scan_document(
     session_id: str,
     file: UploadFile = File(...),
     redis_client = Depends(get_redis),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Step 1: Upload ID and classify"""
+    """Steps 1+2 combined: classify the document, then OCR it, in one call.
+
+    Previously these were two separate endpoints — the mobile client
+    uploaded the same photo twice (once to /classify, again to /ocr),
+    paying for two full network round-trips plus two independent
+    ai-service inference passes back-to-back before the operator saw any
+    result. Since the OCR step's document_type routing comes directly from
+    the classify step's own result, there's no cross-request dependency
+    that actually requires a separate client round-trip in between — doing
+    both server-side in one call removes one full upload+response cycle
+    per scan entirely, which matters most exactly when it hurts most: a
+    slow mobile uplink talking to a small/CPU-constrained server.
+    """
     try:
         session_service.assert_session_venue(db, session_id, current_user.venue_id)
     except ValueError:
@@ -79,7 +91,7 @@ async def classify_document(
     if not session_data_str:
         raise HTTPException(status_code=404, detail="Session not found or expired")
     session_data = json.loads(session_data_str)
-    
+
     file_bytes = await file.read()
 
     # Save to S3 for session duration. Ban status isn't known yet at this
@@ -93,112 +105,87 @@ async def classify_document(
         tmp_path = tmp.name
     object_name = storage_service.upload_image(tmp_path, object_name) or object_name
 
-    # Update state
     try:
         session_service.update_session_data(db, session_id, {"id_image_path": object_name})
         session_service.transition_state(db, session_id, SessionStateEnum.DOCUMENT_CLASSIFIED)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     ai_url = get_ai_service_url()
     async with httpx.AsyncClient() as client:
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{ai_url}/classify", files=files, timeout=180.0)
+            classify_response = await client.post(f"{ai_url}/classify", files=files, timeout=180.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Document classification is taking too long. Please try again.")
         except httpx.ConnectError:
             raise HTTPException(status_code=503, detail="Unable to connect to the verification service. Please try again shortly.")
 
-        if response.status_code == 200:
-            result = response.json()
-            if not result.get("is_valid"):
-                return {"success": False, "message": result.get("reason")}
-            
-            session_data["id_image"] = object_name
-            session_data["classification"] = result
-            session_data["step"] = 2
-            redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
-            
-            return {"success": True, "message": "Document classified successfully"}
-        else:
+        if classify_response.status_code != 200:
             raise HTTPException(status_code=500, detail="AI classification failed")
 
-@router.post("/session/{session_id}/ocr")
-async def extract_ocr(
-    session_id: str,
-    file: UploadFile = File(...),
-    redis_client = Depends(get_redis),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Step 2: OCR Extract"""
-    try:
-        session_service.assert_session_venue(db, session_id, current_user.venue_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Session not found")
+        classification = classify_response.json()
+        if not classification.get("is_valid"):
+            return {"success": False, "message": classification.get("reason")}
 
-    session_data_str = redis_client.get(f"session:{session_id}")
-    if not session_data_str:
-        raise HTTPException(status_code=404, detail="Session not found")
-    session_data = json.loads(session_data_str)
-    
-    if session_data["step"] < 2:
-        raise HTTPException(status_code=400, detail="Document must be classified first")
-        
-    file_bytes = await file.read()
-    document_type = session_data.get("classification", {}).get("document_type", "uk_driving_licence")
-    ai_url = get_ai_service_url()
-    async with httpx.AsyncClient() as client:
+        session_data["id_image"] = object_name
+        session_data["classification"] = classification
+        # step 2 (classified) is transient within this single call — no
+        # client round-trip happens between classify and OCR anymore, so
+        # this only matters if the OCR call below fails partway through
+        # and a retry needs to know classification already succeeded.
+        session_data["step"] = 2
+        redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
+
+        document_type = classification.get("document_type", "uk_driving_licence")
         files = {'file': (file.filename, file_bytes, file.content_type)}
         try:
-            response = await client.post(f"{ai_url}/ocr", files=files, params={"document_type": document_type}, timeout=180.0)
+            ocr_response = await client.post(f"{ai_url}/ocr", files=files, params={"document_type": document_type}, timeout=180.0)
         except httpx.TimeoutException:
             raise HTTPException(status_code=503, detail="Text extraction is taking too long. Please try again.")
         except httpx.ConnectError:
             raise HTTPException(status_code=503, detail="Unable to connect to the verification service. Please try again shortly.")
 
-        if response.status_code == 200:
-            result = response.json()
-            session_data["ocr"] = result["extracted_data"]
-            session_data["validation"] = result["validation"]
-            session_data["step"] = 3
-            redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
-
-            # Log exactly what was extracted vs. how confident/valid it was,
-            # per-field — this is the primary tool for diagnosing bad
-            # extractions (wrong surname, mismatched DOB, etc.) after the
-            # fact: grep the backend log for the session_id to see the full
-            # field/confidence/validation picture ai-service returned,
-            # without needing to reproduce the scan.
-            extracted = result.get("extracted_data", {})
-            fields = extracted.get("fields", extracted)
-            confidences = extracted.get("confidences", {})
-            validation = result.get("validation", {})
-            logger.info(
-                "OCR extraction session=%s doc_type=%s fields=%s confidences=%s "
-                "avg_confidence=%s valid=%s errors=%s",
-                session_id,
-                document_type,
-                json.dumps(fields, default=str),
-                json.dumps(confidences, default=str),
-                extracted.get("confidence"),
-                validation.get("is_valid"),
-                validation.get("errors"),
-            )
-
-            # Update state
-            try:
-                session_service.update_session_data(db, session_id, {"ocr_data": result["extracted_data"]})
-                session_service.transition_state(db, session_id, SessionStateEnum.OCR_COMPLETED)
-            except ValueError as e:
-                pass # Ignoring errors for now
-
-            return result
-        elif response.status_code == 422:
-            raise HTTPException(status_code=422, detail=response.json().get("message", "No legible text could be extracted from the document."))
-        else:
+        if ocr_response.status_code == 422:
+            raise HTTPException(status_code=422, detail=ocr_response.json().get("message", "No legible text could be extracted from the document."))
+        elif ocr_response.status_code != 200:
             raise HTTPException(status_code=500, detail="OCR extraction failed")
+
+        result = ocr_response.json()
+        session_data["ocr"] = result["extracted_data"]
+        session_data["validation"] = result["validation"]
+        session_data["step"] = 3
+        redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
+
+        # Log exactly what was extracted vs. how confident/valid it was,
+        # per-field — this is the primary tool for diagnosing bad
+        # extractions (wrong surname, mismatched DOB, etc.) after the
+        # fact: grep the backend log for the session_id to see the full
+        # field/confidence/validation picture ai-service returned,
+        # without needing to reproduce the scan.
+        extracted = result.get("extracted_data", {})
+        fields = extracted.get("fields", extracted)
+        confidences = extracted.get("confidences", {})
+        validation = result.get("validation", {})
+        logger.info(
+            "OCR extraction session=%s doc_type=%s fields=%s confidences=%s "
+            "avg_confidence=%s valid=%s errors=%s",
+            session_id,
+            document_type,
+            json.dumps(fields, default=str),
+            json.dumps(confidences, default=str),
+            extracted.get("confidence"),
+            validation.get("is_valid"),
+            validation.get("errors"),
+        )
+
+        try:
+            session_service.update_session_data(db, session_id, {"ocr_data": result["extracted_data"]})
+            session_service.transition_state(db, session_id, SessionStateEnum.OCR_COMPLETED)
+        except ValueError:
+            pass  # Ignoring errors for now
+
+        return {"success": True, **result}
 
 @router.post("/session/{session_id}/face")
 async def face_match(
