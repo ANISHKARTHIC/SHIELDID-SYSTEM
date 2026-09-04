@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/security/token_storage.dart';
 import '../../../../core/security/biometric_auth_service.dart';
 import '../../../../core/security/biometric_prefs.dart';
@@ -9,6 +11,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/confirm_dialog.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/navigation/app_page_route.dart';
+import '../../data/datasources/remote_data_source.dart';
 import 'connection_settings_view.dart';
 
 class ProfileView extends ConsumerStatefulWidget {
@@ -27,11 +30,67 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   bool _biometricAvailable = false;
   bool _checkingBiometric = true;
 
+  bool _isCheckingUpdate = true;
+  String? _currentVersion;
+  String? _latestVersion;
+  String? _updateUrl;
+  bool? _updateAvailable;
+
   @override
   void initState() {
     super.initState();
     _loadProfile();
     _loadBiometricState();
+    // Checked immediately on opening Profile — this is the first thing
+    // staff should see here, not something reachable only by drilling
+    // into Connection settings.
+    _checkForUpdate();
+  }
+
+  int _compareVersions(String a, String b) {
+    final partsA = a.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+    final partsB = b.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+    final length = partsA.length > partsB.length ? partsA.length : partsB.length;
+    for (var i = 0; i < length; i++) {
+      final va = i < partsA.length ? partsA[i] : 0;
+      final vb = i < partsB.length ? partsB[i] : 0;
+      if (va != vb) return va.compareTo(vb);
+    }
+    return 0;
+  }
+
+  Future<void> _checkForUpdate() async {
+    setState(() => _isCheckingUpdate = true);
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      final latest = await RemoteDataSource().getLatestVersion();
+      final latestVersion = (latest['latest_version'] ?? '').toString();
+      if (!mounted) return;
+      setState(() {
+        _currentVersion = packageInfo.version;
+        _latestVersion = latestVersion.isNotEmpty ? latestVersion : null;
+        _updateUrl = (latest['update_url'] ?? '').toString();
+        _updateAvailable = _latestVersion != null &&
+            _compareVersions(_latestVersion!, packageInfo.version) > 0;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _updateAvailable = null);
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  Future<void> _openUpdateUrl() async {
+    final url = _updateUrl;
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        showAppErrorSnackBar(context, 'Could not open update link');
+      }
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -112,6 +171,8 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         children: [
+          _buildUpdateCard(colors),
+          const SizedBox(height: 22),
           Row(
             children: [
               Container(
@@ -249,6 +310,112 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// First thing shown on Profile — checked automatically on open, not
+  /// tucked one tap deeper inside Connection settings. Tapping it always
+  /// opens Connection settings (for the full version/status detail and,
+  /// when relevant, the "Update Now" download); this card itself is a
+  /// summary, not the update button's only home.
+  Widget _buildUpdateCard(AppColorsExt colors) {
+    final hasUpdate = _updateAvailable == true;
+    final bg = hasUpdate ? colors.warningSoft : colors.surface;
+    final accent = hasUpdate ? colors.warning : colors.primary;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        Navigator.of(
+          context,
+        ).push(AppPageRoute.push(const ConnectionSettingsView()));
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: hasUpdate ? accent.withValues(alpha: 0.5) : colors.line,
+            width: hasUpdate ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                hasUpdate ? Icons.system_update_rounded : Icons.check_circle_rounded,
+                color: accent,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _isCheckingUpdate
+                        ? 'Checking for updates…'
+                        : hasUpdate
+                            ? 'Update available: v$_latestVersion'
+                            : _updateAvailable == null
+                                ? 'Could not check for updates'
+                                : 'App is up to date',
+                    style: TextStyle(
+                      color: colors.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (_currentVersion != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Current version: $_currentVersion',
+                      style: TextStyle(
+                        color: colors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (_isCheckingUpdate)
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.2, color: accent),
+              )
+            else if (hasUpdate)
+              SizedBox(
+                height: 36,
+                child: ElevatedButton(
+                  onPressed: _openUpdateUrl,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  child: const Text('Update'),
+                ),
+              )
+            else
+              Icon(Icons.chevron_right_rounded, color: colors.muted, size: 20),
+          ],
+        ),
       ),
     );
   }
