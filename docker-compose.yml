@@ -1,10 +1,10 @@
-# `main` is tuned for a t3.micro free-tier demo box: 1GB RAM + swap as
-# backstop, not primary memory. db(160M) + redis(48M) + backend(256M) +
-# frontend(160M) = 624M hard-capped real RAM, leaving ai-service the rest
-# of the 1GB plus swap for its model weights (see the ai-service service
-# below for why it has no hard limit). The `high-power` branch targets a
-# real t3.medium+ instance and is not this tight — do not port these
-# limits over there, and don't port high-power's limits back here.
+# Full-power, accurate deployment sizing for a real t3.medium+ (or
+# equivalent non-burstable, e.g. m7i-flex.large) instance: buffalo_l
+# InsightFace at 640px, comfortable per-service memory limits. This
+# replaced the earlier, separately-maintained trimmed-down t3.micro
+# free-tier config (buffalo_s/320px, every service capped to its floor) —
+# see git history on this file for that tuning if a free-tier deployment
+# is ever needed again.
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -20,21 +20,16 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # t3.micro tuning: this branch targets a 1GB-RAM free-tier demo box
-    # (with swap as backstop, not primary memory), so every service here is
-    # trimmed as far as it'll go without breaking — ai-service (real
-    # InsightFace+EasyOCR+torch inference) needs whatever real RAM can be
-    # freed up from everything else. shared_buffers/work_mem below are
-    # near Postgres' practical floor for a still-usable single-connection
-    # workload.
+    # Postgres defaults assume much more RAM than a t3.medium/m7i-flex.large
+    # has to spare once ai-service and backend are running.
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=48MB"
+      - "shared_buffers=128MB"
       - "-c"
-      - "max_connections=20"
+      - "max_connections=50"
       - "-c"
-      - "work_mem=2MB"
+      - "work_mem=4MB"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-pub_entry_db}" ]
       interval: 5s
@@ -44,14 +39,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 160M
+          memory: 512M
         reservations:
-          memory: 96M
+          memory: 256M
 
   redis:
     image: redis:7-alpine
     container_name: venuepass_redis
-    command: [ "redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru" ]
+    command: [ "redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru" ]
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -65,48 +60,35 @@ services:
     deploy:
       resources:
         limits:
-          memory: 48M
+          memory: 160M
         reservations:
-          memory: 24M
+          memory: 96M
 
   ai-service:
     build:
       context: ./ai-service
       dockerfile: Dockerfile
-      # buffalo_s (~160MB) + a 320px detector input instead of buffalo_l
-      # (~600MB) + 640px — measured peak RSS for just loading this pack is
-      # ~615MB (see commit message), which is already most of a t3.micro's
-      # 1GB. buffalo_l would not fit at all. Every other service in this
-      # file is trimmed specifically to leave this one as much real RAM as
-      # possible; the rest lives in swap.
-      args:
-        INSIGHTFACE_MODEL_PACK: buffalo_s
-        INSIGHTFACE_DET_SIZE: "320"
     container_name: venuepass_ai_service
     environment:
-      # Single thread, not 2 — a t3.micro is 2 vCPU but both are needed for
-      # everything else running concurrently; oversubscribing threads here
-      # just adds context-switch overhead without real parallelism to use.
-      OMP_NUM_THREADS: "1"
-      ORT_NUM_THREADS: "1"
+      # Keep CPU thread pools in check — PyTorch/onnxruntime default to
+      # using every core, which starves the other containers on a 2 vCPU box.
+      OMP_NUM_THREADS: "2"
+      ORT_NUM_THREADS: "2"
     ports:
       - "127.0.0.1:8001:8001"
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/docs" ]
       interval: 30s
       timeout: 30s
-      start_period: 180s
+      start_period: 120s
       retries: 10
     restart: unless-stopped
     deploy:
       resources:
-        # No hard limit: on a 1GB host, capping ai-service tightly just
-        # gets it OOM-killed by Docker instead of the kernel swapping it
-        # out — letting it use whatever's actually available (real RAM,
-        # then swap) is the whole point of this branch's trade-off. The
-        # other services' tight limits below are what actually protects it.
+        limits:
+          memory: 1536M
         reservations:
-          memory: 512M
+          memory: 1024M
 
   backend:
     build:
@@ -116,11 +98,10 @@ services:
     # Seed the database (default venue + bootstrap super_admin from
     # SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD below) before starting the API —
     # backend/seed.py is idempotent, so this is safe to run on every
-    # container start/restart. Single uvicorn worker (not 2) — a t3.micro
-    # has no spare RAM for a second worker process.
+    # container start/restart.
     command: >
       sh -c "python -m backend.seed &&
-             uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 1"
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
@@ -164,9 +145,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
         reservations:
-          memory: 128M
+          memory: 256M
 
   frontend:
     build:
@@ -184,9 +165,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 160M
+          memory: 384M
         reservations:
-          memory: 96M
+          memory: 192M
 
 volumes:
   postgres_data:
