@@ -25,20 +25,68 @@ class HomeView extends ConsumerStatefulWidget {
   ConsumerState<HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewState extends ConsumerState<HomeView> {
+class _HomeViewState extends ConsumerState<HomeView>
+    with SingleTickerProviderStateMixin {
   bool _isLoading = false;
   Map<String, dynamic>? _stats;
   Map<String, dynamic>? _occupancy;
   List<dynamic>? _recentActivity;
 
+  late final AnimationController _entranceController;
+
   @override
   void initState() {
     super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
     if (widget.loadInitialData) {
       _fetchStats();
       _fetchOccupancy();
       _fetchRecentActivity();
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_entranceController.value == 0 && !_entranceController.isAnimating) {
+      if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+        _entranceController.value = 1;
+      } else {
+        _entranceController.forward();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    super.dispose();
+  }
+
+  /// Each dashboard block fades/slides in with a slight stagger by index —
+  /// the whole screen "settles into place" top-to-bottom instead of every
+  /// card appearing simultaneously, matching the entrance treatment login
+  /// and the splash screen already use.
+  Widget _staggered(int index, Widget child) {
+    final start = (index * 0.08).clamp(0.0, 0.6);
+    final end = (start + 0.4).clamp(0.0, 1.0);
+    final curve = CurvedAnimation(
+      parent: _entranceController,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+    );
+    return FadeTransition(
+      opacity: curve,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.03),
+          end: Offset.zero,
+        ).animate(curve),
+        child: child,
+      ),
+    );
   }
 
   Future<void> _fetchOccupancy() async {
@@ -131,101 +179,110 @@ class _HomeViewState extends ConsumerState<HomeView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppSurface(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'ACTIVE SHIFT',
-                    style: TextStyle(
-                      color: colors.muted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.06,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    _stats?["operator_name"] ?? "Door Staff",
-                    style: TextStyle(
-                      color: colors.ink,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.01,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    DateFormat('EEEE, MMMM d').format(DateTime.now()),
-                    style: TextStyle(
-                      color: colors.muted,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildOccupancyCard(colors),
-            const SizedBox(height: 16),
-            AppSurface(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
-              child: Row(
-                children: [
-                  _buildStatColumn(
-                    colors,
-                    'Verified',
-                    _stats != null ? _stats!["verified"].toString() : '-',
-                    colors.ink,
-                    isFirst: true,
-                  ),
-                  _buildStatColumn(
-                    colors,
-                    'Pending',
-                    _stats != null ? _stats!["pending"].toString() : '-',
-                    colors.ink,
-                  ),
-                  _buildStatColumn(
-                    colors,
-                    'Flagged',
-                    _stats != null ? _stats!["flagged"].toString() : '-',
-                    colors.warning,
-                    isLast: true,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _startVerification,
-              child: _isLoading
-                  ? SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(
-                        color: colors.onPrimary,
-                        strokeWidth: 3,
+            _staggered(
+              0,
+              AppSurface(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ACTIVE SHIFT',
+                      style: TextStyle(
+                        color: colors.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.06,
                       ),
-                    )
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.document_scanner_rounded,
-                          color: colors.onPrimary,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          'Start Verification',
-                          style: TextStyle(color: colors.onPrimary),
-                        ),
-                      ],
                     ),
+                    const SizedBox(height: 14),
+                    Text(
+                      _stats?["operator_name"] ?? "Door Staff",
+                      style: TextStyle(
+                        color: colors.ink,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.01,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      DateFormat('EEEE, MMMM d').format(DateTime.now()),
+                      style: TextStyle(
+                        color: colors.muted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _staggered(1, _buildOccupancyCard(colors)),
+            const SizedBox(height: 16),
+            _staggered(
+              2,
+              AppSurface(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
+                child: Row(
+                  children: [
+                    _buildStatColumn(
+                      colors,
+                      'Verified',
+                      _stats != null ? _stats!["verified"].toString() : '-',
+                      colors.ink,
+                      isFirst: true,
+                    ),
+                    _buildStatColumn(
+                      colors,
+                      'Pending',
+                      _stats != null ? _stats!["pending"].toString() : '-',
+                      colors.ink,
+                    ),
+                    _buildStatColumn(
+                      colors,
+                      'Flagged',
+                      _stats != null ? _stats!["flagged"].toString() : '-',
+                      colors.warning,
+                      isLast: true,
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 28),
-            _buildRecentActivity(colors),
+            _staggered(
+              3,
+              ElevatedButton(
+                onPressed: _isLoading ? null : _startVerification,
+                child: _isLoading
+                    ? SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(
+                          color: colors.onPrimary,
+                          strokeWidth: 3,
+                        ),
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.document_scanner_rounded,
+                            color: colors.onPrimary,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Start Verification',
+                            style: TextStyle(color: colors.onPrimary),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            _staggered(4, _buildRecentActivity(colors)),
           ],
         ),
       ),

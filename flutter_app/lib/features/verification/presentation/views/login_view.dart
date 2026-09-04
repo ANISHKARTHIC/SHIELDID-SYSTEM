@@ -28,6 +28,8 @@ class _LoginViewState extends State<LoginView>
   late final AnimationController _entranceController;
   late final Animation<double> _entranceOpacity;
   late final Animation<Offset> _entranceOffset;
+  late final Animation<double> _formOpacity;
+  late final Animation<Offset> _formOffset;
 
   bool _entranceStarted = false;
 
@@ -36,17 +38,32 @@ class _LoginViewState extends State<LoginView>
     super.initState();
     _entranceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 560),
     );
     _entranceOpacity = CurvedAnimation(
       parent: _entranceController,
-      curve: Curves.easeOutCubic,
+      curve: const Interval(0.0, 0.65, curve: Curves.easeOutCubic),
     );
     _entranceOffset =
         Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(
           CurvedAnimation(
             parent: _entranceController,
-            curve: Curves.easeOutCubic,
+            curve: const Interval(0.0, 0.65, curve: Curves.easeOutCubic),
+          ),
+        );
+    // Form fields + button follow the header with a slight stagger — a
+    // single simultaneous fade read as flat; this makes the header land
+    // first and the interactive part arrive just after, like the screen
+    // is settling into place rather than all popping in at once.
+    _formOpacity = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
+    );
+    _formOffset =
+        Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
           ),
         );
   }
@@ -163,92 +180,103 @@ class _LoginViewState extends State<LoginView>
                       ),
                     ),
                     const SizedBox(height: 32),
-                    if (_errorMessage != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: colors.dangerSoft,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Row(
+                    FadeTransition(
+                      opacity: _formOpacity,
+                      child: SlideTransition(
+                        position: _formOffset,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Icon(
-                              Icons.error_outline_rounded,
-                              color: colors.danger,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: AppTypography.callout.copyWith(
-                                  color: colors.danger,
-                                  fontWeight: FontWeight.w600,
+                            if (_errorMessage != null) ...[
+                              Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: colors.dangerSoft,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline_rounded,
+                                      color: colors.danger,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _errorMessage!,
+                                        style: AppTypography.callout.copyWith(
+                                          color: colors.danger,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
+                              const SizedBox(height: 18),
+                            ],
+                            TextFormField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.username],
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                                prefixIcon: Icon(Icons.mail_outline_rounded),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Enter your email';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
+                              onFieldSubmitted: (_) => _submit(),
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded),
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  ),
+                                ),
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Enter your password';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 28),
+                            ElevatedButton(
+                              onPressed: _isLoading ? null : _submit,
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.4,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('Sign In'),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 18),
-                    ],
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.username],
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.mail_outline_rounded),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Enter your email';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      textInputAction: TextInputAction.done,
-                      autofillHints: const [AutofillHints.password],
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outline_rounded),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                          ),
-                          onPressed: () => setState(
-                            () => _obscurePassword = !_obscurePassword,
-                          ),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Enter your password';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 28),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _submit,
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Sign In'),
                     ),
                   ],
                 ),

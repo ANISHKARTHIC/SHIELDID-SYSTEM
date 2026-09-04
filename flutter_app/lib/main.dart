@@ -12,7 +12,7 @@ import 'core/security/biometric_auth_service.dart';
 import 'core/security/biometric_prefs.dart';
 import 'core/providers/theme_mode_provider.dart';
 import 'core/theme/app_theme.dart';
-import 'core/widgets/branded_loading.dart';
+import 'core/widgets/animated_splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -128,10 +128,10 @@ class _AuthGateState extends State<AuthGate> {
     final Widget content;
     switch (_stage) {
       case _GateStage.checkingSession:
-        content = const _BrandedLoadingScreen(key: ValueKey('checking'));
+        content = const AnimatedSplashScreen(key: ValueKey('checking'));
         break;
       case _GateStage.awaitingBiometric:
-        content = const _BrandedLoadingScreen(
+        content = const AnimatedSplashScreen(
           key: ValueKey('biometric'),
           message: 'Waiting for biometric unlock…',
         );
@@ -158,20 +158,6 @@ class _AuthGateState extends State<AuthGate> {
       transitionBuilder: (child, animation) =>
           FadeTransition(opacity: animation, child: child),
       child: content,
-    );
-  }
-}
-
-class _BrandedLoadingScreen extends StatelessWidget {
-  final String? message;
-
-  const _BrandedLoadingScreen({super.key, this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.colors.canvas,
-      body: BrandedLoadingIndicator(message: message),
     );
   }
 }
