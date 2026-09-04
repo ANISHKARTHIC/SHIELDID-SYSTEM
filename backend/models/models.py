@@ -297,5 +297,24 @@ class Notification(Base):
     type = Column(String) # ALERT, INFO, SUCCESS
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    
+
     venue = relationship("Venue")
+
+class AppRelease(Base):
+    """
+    A published mobile app build. The APK itself lives in S3 (same bucket/
+    client as verification images, under an "app_releases/" prefix — see
+    storage_service.py) so it's served the same way any other stored
+    object is: a short-lived presigned URL, not a public bucket. Rows are
+    kept (not overwritten) so past versions stay downloadable/auditable;
+    `is_latest` marks which single row the app's update check compares
+    against.
+    """
+    __tablename__ = "app_releases"
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(String, unique=True, index=True)
+    s3_key = Column(String)
+    size_bytes = Column(Integer, nullable=True)
+    release_notes = Column(String, nullable=True)
+    is_latest = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

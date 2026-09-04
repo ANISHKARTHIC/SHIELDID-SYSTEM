@@ -45,18 +45,14 @@ class RemoteDataSource {
     return response.data as Map<String, dynamic>;
   }
 
-  /// Latest published app version + update URL, for the Connection
-  /// settings screen's "Check for Updates" action. `/version` lives at the
-  /// app root, same as `/ready`.
+  /// Latest published app release (version, presigned APK download URL,
+  /// size, release notes) for the Connection settings screen's "Check for
+  /// Update" action. Unauthenticated on purpose — a stale/pre-login app
+  /// still needs to be able to find out it's out of date. Under the
+  /// normal `/api/v1` prefix, unlike `/ready`, since it's a real
+  /// versioned resource endpoint, not a root-level infra probe.
   Future<Map<String, dynamic>> getLatestVersion() async {
-    final apiBaseUrl = _dio.options.baseUrl;
-    final rootUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
-    final response = await Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-      ),
-    ).get('$rootUrl/version');
+    final response = await _dio.get('/releases/latest');
     return response.data as Map<String, dynamic>;
   }
 

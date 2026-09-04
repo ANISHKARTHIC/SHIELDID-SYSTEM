@@ -6,13 +6,14 @@ import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 
-/// Server address (fixed — not user-editable, avoids per-device/per-venue
-/// IP misconfiguration) and live backend/AI-service connection status,
-/// plus an app-version update check. Moved off the dashboard
-/// (home_view.dart) — the operator's main screen should show operational
-/// info (occupancy, stats, recent activity), not infrastructure status;
-/// this technical detail belongs here on the Profile tab where it's
-/// reachable but out of the way.
+/// App-version update check (the primary action on this screen — checked
+/// automatically on open and shown as a large hero card up top), server
+/// address (fixed — not user-editable, avoids per-device/per-venue IP
+/// misconfiguration) and live backend/AI-service connection status. Moved
+/// off the dashboard (home_view.dart) — the operator's main screen should
+/// show operational info (occupancy, stats, recent activity), not
+/// infrastructure status; this technical detail belongs here on the
+/// Profile tab where it's reachable but out of the way.
 class ConnectionSettingsView extends StatefulWidget {
   const ConnectionSettingsView({super.key});
 
@@ -24,10 +25,11 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
   bool _isLoadingReadiness = true;
   Map<String, dynamic>? _readiness;
 
-  bool _isCheckingUpdate = false;
+  bool _isCheckingUpdate = true;
   String? _currentVersion;
   String? _latestVersion;
   String? _updateUrl;
+  String? _releaseNotes;
   bool? _updateAvailable;
   String? _updateCheckError;
 
@@ -35,6 +37,10 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
   void initState() {
     super.initState();
     _fetchReadiness();
+    // Checked immediately on open (not just on button tap) — the update
+    // card is the primary reason staff land on this screen, so it
+    // shouldn't require an extra tap just to see whether it applies.
+    _checkForUpdate();
   }
 
   Future<void> _fetchReadiness() async {
@@ -65,7 +71,6 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
     setState(() {
       _isCheckingUpdate = true;
       _updateCheckError = null;
-      _updateAvailable = null;
     });
     try {
       final packageInfo = await PackageInfo.fromPlatform();
@@ -76,12 +81,14 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
         _currentVersion = packageInfo.version;
         _latestVersion = latestVersion.isNotEmpty ? latestVersion : null;
         _updateUrl = (latest['update_url'] ?? '').toString();
+        _releaseNotes = (latest['release_notes'] ?? '').toString();
         _updateAvailable = _latestVersion != null &&
             _compareVersions(_latestVersion!, packageInfo.version) > 0;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _updateAvailable = null;
         _updateCheckError = 'Could not check for updates. Ensure the server is reachable.';
       });
     } finally {
@@ -109,10 +116,14 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
 
     return AppPage(
       title: 'Connection',
-      subtitle: 'Server address and service status',
+      subtitle: 'App updates, server address and service status',
       child: ListView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         children: [
+          _buildUpdateHero(colors),
+          const SizedBox(height: 28),
+          Divider(color: colors.line, height: 1),
+          const SizedBox(height: 22),
           Text(
             'SERVER ADDRESS',
             style: AppTypography.caption.copyWith(
@@ -192,76 +203,146 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
               ],
             ),
           ),
-          const SizedBox(height: 28),
-          Divider(color: colors.line, height: 1),
-          const SizedBox(height: 22),
-          Text(
-            'APP VERSION',
-            style: AppTypography.caption.copyWith(
-              color: colors.muted,
-              letterSpacing: 0.06,
-            ),
-          ),
-          const SizedBox(height: 10),
-          AppSurface(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_currentVersion != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      _updateAvailable == true
-                          ? 'Update available: $_latestVersion (current $_currentVersion)'
-                          : 'Up to date — version $_currentVersion',
-                      style: TextStyle(
-                        color: _updateAvailable == true ? colors.warning : colors.muted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                if (_updateCheckError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      _updateCheckError!,
-                      style: TextStyle(
-                        color: colors.danger,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                Row(
+        ],
+      ),
+    );
+  }
+
+  /// The primary action on this screen: a large, first-position card.
+  /// Three states — checking, update available (prominent full-width
+  /// "Update" button + version/size/notes), or up to date.
+  Widget _buildUpdateHero(AppColorsExt colors) {
+    final hasUpdate = _updateAvailable == true;
+    final bg = hasUpdate ? colors.warningSoft : colors.surface;
+    final accent = hasUpdate ? colors.warning : colors.primary;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: hasUpdate ? accent.withValues(alpha: 0.5) : colors.line,
+          width: hasUpdate ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  hasUpdate ? Icons.system_update_rounded : Icons.check_circle_rounded,
+                  color: accent,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _isCheckingUpdate ? null : _checkForUpdate,
-                        icon: _isCheckingUpdate
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.system_update_rounded),
-                        label: const Text('Check for Update'),
+                    Text(
+                      'APP UPDATE',
+                      style: AppTypography.caption.copyWith(
+                        color: colors.muted,
+                        letterSpacing: 0.06,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isCheckingUpdate
+                          ? 'Checking for updates…'
+                          : hasUpdate
+                              ? 'Update available: v$_latestVersion'
+                              : _updateCheckError != null
+                                  ? 'Could not check'
+                                  : 'You\'re up to date',
+                      style: TextStyle(
+                        color: colors.ink,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
                 ),
-                if (_updateAvailable == true && (_updateUrl ?? '').isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _openUpdateUrl,
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Update'),
-                  ),
-                ],
-              ],
-            ),
+              ),
+              if (_isCheckingUpdate)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2.4),
+                ),
+            ],
           ),
+          if (_currentVersion != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Current version: $_currentVersion',
+              style: TextStyle(
+                color: colors.muted,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (hasUpdate && (_releaseNotes ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _releaseNotes!,
+              style: TextStyle(
+                color: colors.ink.withValues(alpha: 0.8),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          if (_updateCheckError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _updateCheckError!,
+              style: TextStyle(
+                color: colors.danger,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: 18),
+          if (hasUpdate)
+            SizedBox(
+              width: double.infinity,
+              height: 54,
+              child: ElevatedButton.icon(
+                onPressed: _openUpdateUrl,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                icon: const Icon(Icons.download_rounded, size: 22),
+                label: const Text('Update Now'),
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: OutlinedButton.icon(
+                onPressed: _isCheckingUpdate ? null : _checkForUpdate,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Check Again'),
+              ),
+            ),
         ],
       ),
     );

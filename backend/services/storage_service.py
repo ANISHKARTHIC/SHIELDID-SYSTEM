@@ -119,6 +119,30 @@ class StorageService:
             logger.error(f"Error uploading to S3: {e}")
             return None
 
+    def upload_apk(self, file_path: str, object_key: str) -> str:
+        """
+        Uploads an APK build to S3 under the given key (caller supplies the
+        full key, including prefix — unlike upload_image, release APKs
+        aren't split into flagged/unflagged so there's no prefix to
+        compute here). Returns the key on success, None on failure.
+        """
+        if not self.client:
+            logger.warning("S3 client not configured. Skipping APK upload.")
+            return None
+
+        try:
+            self.client.upload_file(
+                file_path,
+                self.bucket_name,
+                object_key,
+                ExtraArgs={"ContentType": "application/vnd.android.package-archive"},
+            )
+            logger.info(f"Uploaded {object_key} to S3 bucket {self.bucket_name}.")
+            return object_key
+        except (ClientError, BotoCoreError) as e:
+            logger.error(f"Error uploading APK to S3: {e}")
+            return None
+
     def get_presigned_url(self, object_name: str, expiry_hours: int = 24) -> str:
         """Returns a temporary URL to view the image."""
         if not self.client:

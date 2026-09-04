@@ -51,15 +51,6 @@ class Settings(BaseSettings):
     # (e.g. ECS Cloud Map DNS or an internal load balancer DNS name).
     AI_SERVICE_URL: str = "http://localhost:8001"
 
-    # Latest published mobile app version + where to get it, surfaced via
-    # GET /version so the app's Connection settings screen can offer an
-    # "Update available" prompt instead of requiring staff to manually
-    # check. Bump LATEST_APP_VERSION (matches pubspec.yaml's version, e.g.
-    # "1.1.0") on each release; APP_UPDATE_URL points wherever the built
-    # APK/store listing is hosted.
-    LATEST_APP_VERSION: str = "1.0.0"
-    APP_UPDATE_URL: str = ""
-
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         # If DB_ENGINE is set to sqlite or postgres unavailable, allow sqlite

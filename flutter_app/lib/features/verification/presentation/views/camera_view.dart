@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import 'ocr_review_view.dart';
 import '../../../../core/widgets/camera_scaffold.dart';
+import '../../../../core/widgets/document_stability_detector.dart';
 import '../../../../core/navigation/app_page_route.dart';
 import '../../../../core/security/camera_permission_service.dart';
 
@@ -16,7 +17,9 @@ class CameraView extends StatefulWidget {
 
 class _CameraViewState extends State<CameraView> {
   CameraController? _controller;
+  DocumentStabilityDetector? _stabilityDetector;
   bool _isCameraInitialized = false;
+  bool _isCapturing = false;
   String? _error;
 
   @override
@@ -66,6 +69,15 @@ class _CameraViewState extends State<CameraView> {
         setState(() {
           _isCameraInitialized = true;
         });
+        // Auto-capture: fires once the framed scene holds steady for
+        // ~0.8s, which reads as "document is in frame and the phone has
+        // stopped moving" without needing real document/edge detection.
+        // Manual shutter tap still works at any time — whichever fires
+        // first wins, guarded by _isCapturing below.
+        _stabilityDetector = DocumentStabilityDetector(
+          controller: _controller!,
+          onStable: _onDocumentStable,
+        )..start();
       }
     } catch (e) {
       if (mounted) {
@@ -78,17 +90,33 @@ class _CameraViewState extends State<CameraView> {
 
   @override
   void dispose() {
+    _stabilityDetector?.stop();
     _controller?.dispose();
     super.dispose();
   }
 
+  void _onDocumentStable() {
+    if (_isCapturing || !mounted) return;
+    _takePicture();
+  }
+
   Future<void> _takePicture() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_isCapturing) return;
+    _isCapturing = true;
 
     try {
+      // takePicture() can't run while the image stream (used for
+      // auto-capture stability detection) is active on most platforms —
+      // stop it first, whether this capture was triggered by the
+      // detector itself or a manual shutter tap.
+      await _stabilityDetector?.stop();
       final image = await _controller!.takePicture();
       _navigateToReview(image.path);
     } catch (e) {
+      _isCapturing = false;
+      _stabilityDetector?.reset();
+      _stabilityDetector?.start();
       if (mounted) {
         setState(() => _error = 'Could not capture photo. Please try again.');
       }
@@ -119,7 +147,7 @@ class _CameraViewState extends State<CameraView> {
     return CameraCaptureScaffold(
       controller: _controller,
       isInitializing: !_isCameraInitialized,
-      instructionText: 'Align identity document inside the frame',
+      instructionText: 'Hold steady — captures automatically when aligned',
       errorText: _error,
       currentStep: 1,
       totalSteps: 3,

@@ -22,6 +22,7 @@ from backend.api.supervisor_router import router as supervisor_router
 from backend.api.analytics_router import router as analytics_router
 from backend.api.export_router import router as export_router
 from backend.api.search_router import router as search_router
+from backend.api.release_router import router as release_router
 from backend.core.logger import get_logger
 
 logger = get_logger("main")
@@ -71,6 +72,7 @@ app.include_router(supervisor_router)
 app.include_router(analytics_router)
 app.include_router(export_router)
 app.include_router(search_router)
+app.include_router(release_router)
 
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
@@ -162,15 +164,6 @@ def get_metrics():
         "verifications_processed": 0, 
         "active_sessions": 0, 
         "errors": 0
-    }
-
-@app.get("/version", tags=["monitoring"])
-def get_version():
-    """Latest published app version, for the mobile app's update check."""
-    from backend.core.config import settings
-    return {
-        "latest_version": settings.LATEST_APP_VERSION,
-        "update_url": settings.APP_UPDATE_URL,
     }
 
 @app.get("/")
