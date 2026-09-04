@@ -178,6 +178,12 @@ yourdomain.com {
 ```
 Caddy handles Let's Encrypt certificate issuance/renewal automatically. Caddy itself is lightweight enough to run directly on the same instance alongside the compose stack.
 
+**If using nginx instead** (e.g. via `certbot --nginx`, which generates its own site config): nginx defaults `client_max_body_size` to 1MB, which is far below the ~20MB+ app release APKs uploaded through `POST /api/v1/releases` (`publish_release.sh`) — that request will fail with `413 Request Entity Too Large` until you raise it. Add to the relevant `server { }` (or `location /api/`) block:
+```nginx
+client_max_body_size 100M;
+```
+then `sudo nginx -t && sudo systemctl reload nginx`. Caddy has no such default limit, so this only applies to the nginx path.
+
 ### Notes
 - **Data retention**: expired visitor records are anonymized automatically every hour (configurable per-venue via the venue config API, 7-day default after a PASS decision). Admins can trigger it manually and view the audit log from Settings in the web console. The bucket lifecycle rule from step 1 is a backstop that expires `scans/unflagged/` objects after 7 days regardless — flagged customers' images (`scans/flagged/`) are exempt from both the cron and the lifecycle rule, by design.
 - **Resource limits**: every service in `docker-compose.yml` has a `deploy.resources.limits.memory` cap so one runaway container (most likely `ai-service` under burst load) can't OOM the whole box; Docker will restart a container that hits its cap rather than letting the kernel OOM-killer pick a victim.
