@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../data/datasources/remote_data_source.dart';
 import '../../../../core/network/dio_client.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/app_snackbar.dart';
 
-/// Server address configuration and live backend/AI-service connection
-/// status. Moved off the dashboard (home_view.dart) — the operator's main
-/// screen should show operational info (occupancy, stats, recent
-/// activity), not infrastructure status; this technical detail belongs
-/// here on the Profile tab where it's reachable but out of the way.
+/// Server address (fixed — not user-editable, avoids per-device/per-venue
+/// IP misconfiguration) and live backend/AI-service connection status,
+/// plus an app-version update check. Moved off the dashboard
+/// (home_view.dart) — the operator's main screen should show operational
+/// info (occupancy, stats, recent activity), not infrastructure status;
+/// this technical detail belongs here on the Profile tab where it's
+/// reachable but out of the way.
 class ConnectionSettingsView extends StatefulWidget {
   const ConnectionSettingsView({super.key});
 
@@ -17,25 +21,20 @@ class ConnectionSettingsView extends StatefulWidget {
 }
 
 class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
-  late final TextEditingController _urlController;
-  bool _isTesting = false;
-  String? _testResult;
-  bool? _testSuccess;
-
   bool _isLoadingReadiness = true;
   Map<String, dynamic>? _readiness;
+
+  bool _isCheckingUpdate = false;
+  String? _currentVersion;
+  String? _latestVersion;
+  String? _updateUrl;
+  bool? _updateAvailable;
+  String? _updateCheckError;
 
   @override
   void initState() {
     super.initState();
-    _urlController = TextEditingController(text: DioClient().dio.options.baseUrl);
     _fetchReadiness();
-  }
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
   }
 
   Future<void> _fetchReadiness() async {
@@ -50,32 +49,56 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
     }
   }
 
-  Future<void> _testConnection() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    setState(() {
-      _isTesting = true;
-      _testResult = 'Testing connection...';
-      _testSuccess = null;
-    });
-    final ok = await DioClient().testConnection(url);
-    if (!mounted) return;
-    setState(() {
-      _isTesting = false;
-      _testSuccess = ok;
-      _testResult = ok
-          ? 'Connected successfully!'
-          : 'Failed to connect. Ensure the server is running.';
-    });
+  int _compareVersions(String a, String b) {
+    final partsA = a.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+    final partsB = b.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+    final length = partsA.length > partsB.length ? partsA.length : partsB.length;
+    for (var i = 0; i < length; i++) {
+      final va = i < partsA.length ? partsA[i] : 0;
+      final vb = i < partsB.length ? partsB[i] : 0;
+      if (va != vb) return va.compareTo(vb);
+    }
+    return 0;
   }
 
-  Future<void> _saveAndApply() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    await DioClient().updateBaseUrl(url);
-    if (!mounted) return;
-    showAppSuccessSnackBar(context, 'Server address updated');
-    _fetchReadiness();
+  Future<void> _checkForUpdate() async {
+    setState(() {
+      _isCheckingUpdate = true;
+      _updateCheckError = null;
+      _updateAvailable = null;
+    });
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      final latest = await RemoteDataSource().getLatestVersion();
+      final latestVersion = (latest['latest_version'] ?? '').toString();
+      if (!mounted) return;
+      setState(() {
+        _currentVersion = packageInfo.version;
+        _latestVersion = latestVersion.isNotEmpty ? latestVersion : null;
+        _updateUrl = (latest['update_url'] ?? '').toString();
+        _updateAvailable = _latestVersion != null &&
+            _compareVersions(_latestVersion!, packageInfo.version) > 0;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _updateCheckError = 'Could not check for updates. Ensure the server is reachable.';
+      });
+    } finally {
+      if (mounted) setState(() => _isCheckingUpdate = false);
+    }
+  }
+
+  Future<void> _openUpdateUrl() async {
+    final url = _updateUrl;
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        showAppSuccessSnackBar(context, 'Could not open update link');
+      }
+    }
   }
 
   @override
@@ -98,42 +121,24 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
             ),
           ),
           const SizedBox(height: 10),
-          TextField(
-            controller: _urlController,
-            decoration: const InputDecoration(
-              labelText: 'API Base URL',
-              hintText: 'https://venuepass-api.duckdns.org/api/v1',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.link_rounded),
+          AppSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Icon(Icons.link_rounded, size: 18, color: colors.muted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    DioClient().dio.options.baseUrl,
+                    style: TextStyle(
+                      color: colors.ink,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _isTesting ? null : _testConnection,
-            icon: _isTesting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.network_check_rounded),
-            label: const Text('Test Connection'),
-          ),
-          if (_testResult != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _testResult!,
-              style: TextStyle(
-                color: _testSuccess == true ? colors.success : colors.danger,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: _saveAndApply,
-            child: const Text('Save & Apply'),
           ),
           const SizedBox(height: 28),
           Divider(color: colors.line, height: 1),
@@ -184,6 +189,76 @@ class _ConnectionSettingsViewState extends State<ConnectionSettingsView> {
                       ? colors.muted
                       : (aiReady ? colors.success : colors.danger),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Divider(color: colors.line, height: 1),
+          const SizedBox(height: 22),
+          Text(
+            'APP VERSION',
+            style: AppTypography.caption.copyWith(
+              color: colors.muted,
+              letterSpacing: 0.06,
+            ),
+          ),
+          const SizedBox(height: 10),
+          AppSurface(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_currentVersion != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      _updateAvailable == true
+                          ? 'Update available: $_latestVersion (current $_currentVersion)'
+                          : 'Up to date — version $_currentVersion',
+                      style: TextStyle(
+                        color: _updateAvailable == true ? colors.warning : colors.muted,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (_updateCheckError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      _updateCheckError!,
+                      style: TextStyle(
+                        color: colors.danger,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isCheckingUpdate ? null : _checkForUpdate,
+                        icon: _isCheckingUpdate
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.system_update_rounded),
+                        label: const Text('Check for Update'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_updateAvailable == true && (_updateUrl ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: _openUpdateUrl,
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Update'),
+                  ),
+                ],
               ],
             ),
           ),

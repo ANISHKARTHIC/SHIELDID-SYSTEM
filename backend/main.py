@@ -164,6 +164,15 @@ def get_metrics():
         "errors": 0
     }
 
+@app.get("/version", tags=["monitoring"])
+def get_version():
+    """Latest published app version, for the mobile app's update check."""
+    from backend.core.config import settings
+    return {
+        "latest_version": settings.LATEST_APP_VERSION,
+        "update_url": settings.APP_UPDATE_URL,
+    }
+
 @app.get("/")
 def read_root():
     return {"message": "VenuePass Verification System API is running."}

@@ -45,6 +45,21 @@ class RemoteDataSource {
     return response.data as Map<String, dynamic>;
   }
 
+  /// Latest published app version + update URL, for the Connection
+  /// settings screen's "Check for Updates" action. `/version` lives at the
+  /// app root, same as `/ready`.
+  Future<Map<String, dynamic>> getLatestVersion() async {
+    final apiBaseUrl = _dio.options.baseUrl;
+    final rootUrl = apiBaseUrl.replaceFirst(RegExp(r'/api/v1/?$'), '');
+    final response = await Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    ).get('$rootUrl/version');
+    return response.data as Map<String, dynamic>;
+  }
+
   Future<String> startSession() async {
     final response = await _dio.post('/session/start');
     return response.data['session_id'];

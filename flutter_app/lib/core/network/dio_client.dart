@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../config.dart';
 import '../security/token_storage.dart';
 
@@ -71,34 +70,17 @@ class DioClient {
     );
   }
 
+  /// The backend address is fixed (AppConfig.defaultBaseUrl) — no
+  /// per-device IP override. Kept as a no-op init hook in case future
+  /// startup wiring (e.g. reading a build-time flavor config) needs a
+  /// place to run before the first request.
   Future<void> init() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedUrl = prefs.getString('backend_base_url');
-      if (savedUrl != null && savedUrl.isNotEmpty) {
-        dio.options.baseUrl = savedUrl;
-      } else {
-        dio.options.baseUrl = AppConfig.defaultBaseUrl;
-      }
-    } catch (e) {
-      dio.options.baseUrl = AppConfig.defaultBaseUrl;
-    }
+    dio.options.baseUrl = AppConfig.defaultBaseUrl;
   }
 
-  Future<void> updateBaseUrl(String url) async {
-    final cleanUrl = url.endsWith('/') ? url.substring(0, url.length - 1) : url;
-    dio.options.baseUrl = cleanUrl;
+  Future<bool> testConnection() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('backend_base_url', cleanUrl);
-    } catch (e) {
-      // Ignore
-    }
-  }
-
-  Future<bool> testConnection([String? testUrl]) async {
-    try {
-      final targetUrl = testUrl ?? dio.options.baseUrl;
+      final targetUrl = dio.options.baseUrl;
       final tempDio = Dio(
         BaseOptions(
           // /operator/stats itself is cheap (no AI involved), but on a

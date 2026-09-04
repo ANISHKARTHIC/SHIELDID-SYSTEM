@@ -209,6 +209,35 @@ class TestOCRAndUKLicence(unittest.TestCase):
         self.assertTrue(res["valid"], res["errors"])
         self.assertEqual(res["sanitized_num"][13], "9")  # G -> 9, not 6
 
+    def test_recovers_all_fields_when_1_2_5_labels_are_dropped_by_ocr(self):
+        # Regression: real-world failure on a photographed UK licence
+        # (POWERS / ALEX / POWER904031A99WM). EasyOCR frequently drops the
+        # tiny "1"/"2"/"5" digit-label glyphs entirely, leaving surname,
+        # first_names and licence_number all unlabeled with zero fallback
+        # (unlike DOB and licence_number's shape-regex fallback, which
+        # existed but had two bugs: the check-char segment's whitelist
+        # excluded ordinary letters, and the initials segment required
+        # pure letters when a "9" padding digit is valid there too).
+        ocr_results = [
+            self._box("POWERS", y=80),
+            self._box("MR ALEX", y=110),
+            self._box("03 04 1991 ENGLAND", y=140),
+            self._box("15 01 2026", y=170),
+            self._box("28 01 2030", y=200),
+            self._box("DVLA", y=230),
+            self._box("POWER904031A99WM 50", y=260),
+            self._box("APARTMENT 14, STONE ARCHES, YORK ROAD", y=290),
+            self._box("DONCASTER, DN5 8AD", y=315),
+            self._box("AM/A/B1/B/BE", y=340),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["licence_number"], "POWER904031A99WM")
+        self.assertEqual(fields["surname"], "POWER")
+        self.assertEqual(fields["first_names"], "MR ALEX")
+        self.assertEqual(fields["date_of_birth"], "1991-04-03")
+        self.assertTrue(result["validation"]["is_valid"], result["validation"]["errors"])
+
     def test_clean_address_fixes_house_code_letter_digit_confusion(self):
         # Regression: found on a real card — "H89D" (house identifier)
         # OCR'd as "H8gD", 'g' standing in for '9'.

@@ -454,7 +454,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             # accidentally concatenate them into a run of characters that
             # coincidentally fits the 16-char licence-number shape (e.g. a
             # surname + DOB digits + initials merging into a bogus "number").
-            licence_regex = re.compile(r'([A-Z]{5}[0-9OISZBG]{6}[A-Z]{2}[A-Z0-9OISZBG]{3})', re.IGNORECASE)
+            licence_regex = re.compile(r'([A-Z]{5}[0-9OISZBG]{6}[A-Z0-9]{2}[A-Z0-9]{3})', re.IGNORECASE)
             claimed_texts = {
                 fields["surname"].upper(),
                 fields["first_names"].upper(),
@@ -538,7 +538,47 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             if not fields["surname"] and rule_data.get("sanitized_num"):
                 fields["surname"] = rule_data["sanitized_num"][:5].replace("9", "")
                 confidences["surname"] = confidences["licence_number"]
-                
+
+            # First-names label (field 2) can be lost the same way field 1
+            # is (tiny digit glyph dropped by OCR) with no other fallback —
+            # unlike surname, which can be rebuilt from the licence number's
+            # own encoded prefix. Use chars 12-13 (initials) instead: find
+            # an unclaimed text box whose first word starts with that
+            # initial, skipping the box(es) already claimed by surname/DOB/
+            # licence_number so we don't just echo those back as a name.
+            if not fields["first_names"] and rule_data.get("sanitized_num"):
+                initial = rule_data["sanitized_num"][11:12]
+                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR"}
+                if initial.isalpha():
+                    claimed = {
+                        fields["surname"].upper(),
+                        fields["licence_number"].upper(),
+                        fields["date_of_birth"].upper(),
+                    } - {""}
+                    # Name fields (1/2) sit above DOB/address/etc on a UK
+                    # licence — restrict the search to boxes above field 3's
+                    # y-position (when known) so an address or categories
+                    # line lower on the card can't be mistaken for a name
+                    # just because its first word happens to share the
+                    # initial.
+                    dob_y = None
+                    for b in boxes:
+                        if fields["date_of_birth"] and DATE_PATTERN.search(b["text"]):
+                            dob_y = b["y"]
+                            break
+                    for box in boxes:
+                        if dob_y is not None and box["y"] >= dob_y:
+                            continue
+                        candidate = box["text"].strip()
+                        candidate_upper = candidate.upper()
+                        if candidate_upper in claimed or is_label(candidate_upper):
+                            continue
+                        words = [w for w in re.sub(r'[^A-Z\s]', '', candidate_upper).split() if w not in titles]
+                        if words and words[0][0:1] == initial:
+                            fields["first_names"] = candidate
+                            confidences["first_names"] = box["conf"]
+                            break
+
             validation_result = {
                 "is_valid": rule_data["valid"],
                 "errors": rule_data["errors"],
