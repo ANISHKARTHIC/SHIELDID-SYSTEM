@@ -50,18 +50,33 @@ class CameraCaptureScaffold extends StatefulWidget {
   });
 
   @override
-  State<CameraCaptureScaffold> createState() => _CameraCaptureScaffoldState();
+  State<CameraCaptureScaffold> createState() => CameraCaptureScaffoldState();
 }
 
-class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
+class CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
   bool _showFlash = false;
+  bool _isShutterPressed = false;
 
-  Future<void> _handleCapture() async {
+  /// Haptic buzz + a brief white flash over the preview — the visible
+  /// "a photo was just taken" confirmation. Exposed publicly (not just
+  /// the private tap handler below) so a caller whose capture isn't a
+  /// button tap — the document-stability auto-capture in camera_view.dart
+  /// — can trigger the exact same feedback instead of silently jumping
+  /// straight to the review screen with no visible confirmation at all.
+  void triggerCaptureFeedback() {
     HapticFeedback.mediumImpact();
+    if (!mounted) return;
     setState(() => _showFlash = true);
-    Future.delayed(const Duration(milliseconds: 180), () {
+    // Held slightly longer than the original 180ms — short enough not to
+    // feel laggy, but long enough to actually register as "something
+    // visibly happened" rather than a single dropped frame.
+    Future.delayed(const Duration(milliseconds: 260), () {
       if (mounted) setState(() => _showFlash = false);
     });
+  }
+
+  Future<void> _handleCapture() async {
+    triggerCaptureFeedback();
     await widget.onCapture();
   }
 
@@ -377,24 +392,40 @@ class _CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                         children: [
                           Center(
                             child: GestureDetector(
+                              onTapDown: (_) =>
+                                  setState(() => _isShutterPressed = true),
+                              onTapCancel: () =>
+                                  setState(() => _isShutterPressed = false),
+                              onTapUp: (_) =>
+                                  setState(() => _isShutterPressed = false),
                               onTap: _handleCapture,
-                              child: Container(
-                                width: 76,
-                                height: 76,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 4,
-                                  ),
-                                ),
+                              // Shrinks slightly the instant a finger touches
+                              // it, before the photo/flash even completes —
+                              // the button had no press feedback at all
+                              // before, which read as unresponsive ("can't
+                              // tell if it registered the tap").
+                              child: AnimatedScale(
+                                scale: _isShutterPressed ? 0.9 : 1.0,
+                                duration: const Duration(milliseconds: 100),
+                                curve: Curves.easeOut,
                                 child: Container(
-                                  width: 60,
-                                  height: 60,
-                                  decoration: const BoxDecoration(
+                                  width: 76,
+                                  height: 76,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: Colors.white,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 4,
+                                    ),
+                                  ),
+                                  child: Container(
+                                    width: 60,
+                                    height: 60,
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                               ),

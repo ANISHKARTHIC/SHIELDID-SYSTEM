@@ -21,6 +21,7 @@ class _CameraViewState extends State<CameraView> {
   bool _isCameraInitialized = false;
   bool _isCapturing = false;
   String? _error;
+  final _scaffoldKey = GlobalKey<CameraCaptureScaffoldState>();
 
   @override
   void initState() {
@@ -97,6 +98,11 @@ class _CameraViewState extends State<CameraView> {
 
   void _onDocumentStable() {
     if (_isCapturing || !mounted) return;
+    // Auto-capture has no tap to hang the usual haptic+flash feedback
+    // off of — trigger it explicitly so it's just as visible/felt as a
+    // manual shutter press, instead of silently jumping to the review
+    // screen with no confirmation a photo was taken at all.
+    _scaffoldKey.currentState?.triggerCaptureFeedback();
     _takePicture();
   }
 
@@ -145,6 +151,7 @@ class _CameraViewState extends State<CameraView> {
   @override
   Widget build(BuildContext context) {
     return CameraCaptureScaffold(
+      key: _scaffoldKey,
       controller: _controller,
       isInitializing: !_isCameraInitialized,
       instructionText: 'Hold steady — captures automatically when aligned',
