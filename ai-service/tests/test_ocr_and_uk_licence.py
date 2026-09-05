@@ -233,9 +233,41 @@ class TestOCRAndUKLicence(unittest.TestCase):
         result = self.processor.process(ocr_results)
         fields = result["fields"]
         self.assertEqual(fields["licence_number"], "POWER904031A99WM")
-        self.assertEqual(fields["surname"], "POWER")
+        # Recovered from the "POWERS" box itself (matched against the
+        # licence number's encoded 5-char prefix "POWER"), not just the
+        # bare truncated prefix — the real surname on the card is
+        # "POWERS", and a box-text match is available here, so it's used
+        # in preference to the lossy truncated fallback.
+        self.assertEqual(fields["surname"], "POWERS")
         self.assertEqual(fields["first_names"], "MR ALEX")
         self.assertEqual(fields["date_of_birth"], "1991-04-03")
+        self.assertTrue(result["validation"]["is_valid"], result["validation"]["errors"])
+
+    def test_first_names_fallback_does_not_reclaim_surnames_own_source_box(self):
+        # Regression: real-world failure on a photographed UK licence
+        # (JOHN INICO / MR JOHN WILBERT / JOHNI011081JW9FN). With labels
+        # 1/2/5 dropped, surname recovers via the licence number's encoded
+        # prefix "JOHNI" matched back against the "JOHN INICO" box — but
+        # the first_names fallback only excluded fields["surname"] itself
+        # (which, before this fix, held only the bare 5-char prefix
+        # "JOHNI", never equal to the full box text), so "JOHN INICO" was
+        # free to be re-picked as first_names too (its first word "JOHN"
+        # matches the required initial), even though it was already used
+        # as the surname's own source text.
+        ocr_results = [
+            self._box("JOHN INICO", y=80),
+            self._box("MR JOHN WILBERT", y=110),
+            self._box("08 11 2001 INDIA", y=140),
+            self._box("20 12 2025", y=170),
+            self._box("19 12 2035", y=200),
+            self._box("DVLA", y=230),
+            self._box("JOHNI011081JW9FN 59", y=260),
+        ]
+        result = self.processor.process(ocr_results)
+        fields = result["fields"]
+        self.assertEqual(fields["licence_number"], "JOHNI011081JW9FN")
+        self.assertEqual(fields["surname"], "JOHN INICO")
+        self.assertEqual(fields["first_names"], "MR JOHN WILBERT")
         self.assertTrue(result["validation"]["is_valid"], result["validation"]["errors"])
 
     def test_clean_address_fixes_house_code_letter_digit_confusion(self):

@@ -535,9 +535,31 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 confidences["date_of_birth"] = confidences["licence_number"]
             
             # If DOB and Names still empty, generate fallback names from the licence number
+            surname_source_box_text = None
             if not fields["surname"] and rule_data.get("sanitized_num"):
-                fields["surname"] = rule_data["sanitized_num"][:5].replace("9", "")
-                confidences["surname"] = confidences["licence_number"]
+                prefix = rule_data["sanitized_num"][:5].replace("9", "")
+                # The encoded prefix is truncated/padded to 5 chars, so it
+                # won't equal the real surname text verbatim (e.g. prefix
+                # "JOHNI" for actual surname box "JOHN INICO") — search for
+                # the real source box whose (letters-only) text starts with
+                # this prefix, same idea as the spatial surname fallback
+                # above, so downstream logic (first_names fallback below)
+                # can recognize and exclude the box this surname actually
+                # came from instead of only knowing the derived prefix
+                # string. Falls back to the bare prefix if no box matches.
+                match_box = None
+                for b in boxes:
+                    letters_only = re.sub(r'[^A-Z]', '', b["text"].upper())
+                    if letters_only.startswith(prefix):
+                        match_box = b
+                        break
+                if match_box:
+                    fields["surname"] = match_box["text"].strip()
+                    confidences["surname"] = match_box["conf"]
+                    surname_source_box_text = match_box["text"].upper()
+                else:
+                    fields["surname"] = prefix
+                    confidences["surname"] = confidences["licence_number"]
 
             # First-names label (field 2) can be lost the same way field 1
             # is (tiny digit glyph dropped by OCR) with no other fallback —
@@ -555,6 +577,15 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                         fields["licence_number"].upper(),
                         fields["date_of_birth"].upper(),
                     } - {""}
+                    # The surname's *actual source box text* (e.g. "JOHN
+                    # INICO") is what must be excluded here — fields["surname"]
+                    # itself may hold only the derived 5-char prefix
+                    # ("JOHNI"), which would never match this box's full
+                    # text anyway and silently let it get re-picked as
+                    # first_names too (confirmed real failure: "JOHN INICO"
+                    # claimed as both surname source and first_names).
+                    if surname_source_box_text:
+                        claimed.add(surname_source_box_text)
                     # Name fields (1/2) sit above DOB/address/etc on a UK
                     # licence — restrict the search to boxes above field 3's
                     # y-position (when known) so an address or categories

@@ -408,6 +408,18 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                    // The app theme's default ElevatedButton style forces
+                    // minimumSize to Size.fromHeight(56), i.e. infinite
+                    // width, for the full-width primary-action buttons
+                    // used everywhere else. Left unset here, this compact
+                    // inline button inherited that and demanded infinite
+                    // width inside this Row, squeezing the Expanded text
+                    // next to it down to near-zero — which is what made
+                    // "Update available: v1.0.3" render one character per
+                    // line. minimumSize: Size.zero opts this one button
+                    // back out, sized to its own content instead.
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: const Text('Update'),
                 ),
