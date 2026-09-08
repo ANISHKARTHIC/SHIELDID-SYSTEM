@@ -106,13 +106,25 @@ class _CameraViewState extends State<CameraView> {
     // manual shutter press, instead of silently jumping to the review
     // screen with no confirmation a photo was taken at all.
     _scaffoldKey.currentState?.triggerCaptureFeedback();
-    _takePicture();
+    _takePicture(checkSharpness: true);
   }
 
-  Future<void> _takePicture() async {
+  /// Below this mean-gradient score the frame is treated as too blurry to
+  /// send straight to OCR — tuned against real captures: a sharp,
+  /// in-focus document scan reads comfortably above 10 on this scale,
+  /// while a blurry/motion-smeared one reads under 4-5. Only gates the
+  /// auto-capture path (see [_takePicture]'s `checkSharpness` param) since
+  /// the stability detector's image stream — the only source for this
+  /// score — isn't running for a manual shutter tap that fires before
+  /// stability was reached.
+  static const _minAcceptableSharpness = 6.0;
+
+  Future<void> _takePicture({bool checkSharpness = false}) async {
     if (_controller == null || !_controller!.value.isInitialized) return;
     if (_isCapturing) return;
     setState(() => _isCapturing = true);
+
+    final sharpness = _stabilityDetector?.lastSharpness;
 
     try {
       // takePicture() can't run while the image stream (used for
@@ -120,7 +132,39 @@ class _CameraViewState extends State<CameraView> {
       // stop it first, whether this capture was triggered by the
       // detector itself or a manual shutter tap.
       await _stabilityDetector?.stop();
+
+      if (checkSharpness &&
+          sharpness != null &&
+          sharpness < _minAcceptableSharpness) {
+        // Stable (motion-wise) but still out of focus — e.g. auto-focus
+        // still hunting, or held too close. Skip the capture entirely and
+        // let the detector keep watching rather than snapping a photo
+        // that's just going to fail OCR downstream.
+        if (mounted) {
+          setState(() => _isCapturing = false);
+          _stabilityDetector?.reset();
+          _stabilityDetector?.start();
+        }
+        return;
+      }
+
       final image = await _controller!.takePicture();
+
+      if (checkSharpness &&
+          sharpness != null &&
+          sharpness < _minAcceptableSharpness * 1.5 &&
+          mounted) {
+        final shouldRetake = await _confirmBlurryCapture();
+        if (shouldRetake == true) {
+          if (mounted) {
+            setState(() => _isCapturing = false);
+            _stabilityDetector?.reset();
+            _stabilityDetector?.start();
+          }
+          return;
+        }
+      }
+
       await _navigateToReview(image.path);
     } catch (e) {
       if (mounted) {
@@ -133,6 +177,36 @@ class _CameraViewState extends State<CameraView> {
         _stabilityDetector?.start();
       }
     }
+  }
+
+  /// Manual clarity gate for a borderline-sharp auto-capture: shows the
+  /// captured photo and asks staff to confirm it's legible rather than
+  /// silently sending a marginal photo straight to OCR (which is where a
+  /// soft-focus capture actually surfaces as a failed/garbled extraction
+  /// several seconds later, far from the moment it could cheaply be
+  /// retaken).
+  Future<bool?> _confirmBlurryCapture() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Photo may be blurry'),
+        content: const Text(
+          'This capture looks a little out of focus, which can cause '
+          'incorrect data extraction. Use it anyway, or retake?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Retake'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Use Photo'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickImage() async {

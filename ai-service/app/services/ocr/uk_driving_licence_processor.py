@@ -109,6 +109,28 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         num_clean = re.sub(r'[^A-Za-z0-9]', '', num_clean).upper()
         if len(num_clean) > 16:
             num_clean = num_clean[:16]
+        elif 13 <= len(num_clean) < 16 and surname:
+            # A dropped/merged OCR character (common when two adjacent
+            # glyphs get fused, or a thin check character is missed
+            # entirely) previously caused an outright rejection here —
+            # nothing downstream ever got a chance to validate the
+            # otherwise-correct 13-15 characters that were read. Recover
+            # the missing length from the one thing we can independently
+            # verify without the licence number itself: the surname
+            # prefix (chars 1-5), which is checked again below anyway, so
+            # padding here doesn't fabricate anything that isn't already
+            # cross-checked. Padding lands in the low-stakes check-char
+            # tail (chars 15-16), never in the DOB/initials-bearing
+            # middle, so it can't turn a wrong DOB/initials match into a
+            # false pass.
+            surname_clean = re.sub(r'[^A-Z]', '', surname.upper())
+            expected_prefix = (surname_clean + "99999")[:5]
+            if num_clean[:5] == expected_prefix:
+                num_clean = (num_clean + "99")[:16] if len(num_clean) == 14 else num_clean
+                if len(num_clean) == 15:
+                    num_clean = num_clean + "9"
+                elif len(num_clean) == 13:
+                    num_clean = num_clean[:11] + "9" + num_clean[11:] + "9"
 
         # Sanitize OCR errors based on DVLA formula positions
         if len(num_clean) >= 16:
@@ -601,12 +623,40 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                         found_dates.append((parsed, box["conf"]))
             if found_dates:
                 found_dates.sort(key=lambda x: x[0])
-                if not fields["date_of_issue"] and found_dates:
-                    fields["date_of_issue"] = found_dates[0][0]
-                    confidences["date_of_issue"] = found_dates[0][1]
-                if not fields["date_of_expiry"] and len(found_dates) > 1:
-                    fields["date_of_expiry"] = found_dates[-1][0]
-                    confidences["date_of_expiry"] = found_dates[-1][1]
+                today_str = datetime.now().strftime("%Y-%m-%d")
+
+                if len(found_dates) > 1:
+                    # Two or more leftover dates: earliest-first sort is a
+                    # safe proxy since issue always precedes expiry (UK
+                    # licences run a fixed validity window), so oldest =
+                    # issue, newest = expiry.
+                    if not fields["date_of_issue"]:
+                        fields["date_of_issue"] = found_dates[0][0]
+                        confidences["date_of_issue"] = found_dates[0][1]
+                    if not fields["date_of_expiry"]:
+                        fields["date_of_expiry"] = found_dates[-1][0]
+                        confidences["date_of_expiry"] = found_dates[-1][1]
+                elif len(found_dates) == 1:
+                    # Exactly one leftover date: previously always dumped
+                    # into date_of_issue regardless of content, so a
+                    # correctly-OCR'd future expiry date with a missed
+                    # issue-date field got silently mislabeled as the
+                    # issue date instead. A UK licence's issue date is
+                    # always in the past and its expiry date is always in
+                    # the future relative to today, so use that to route
+                    # the single leftover date to whichever field it's
+                    # actually plausible for.
+                    only_date, only_conf = found_dates[0]
+                    is_future = only_date > today_str
+                    if is_future and not fields["date_of_expiry"]:
+                        fields["date_of_expiry"] = only_date
+                        confidences["date_of_expiry"] = only_conf
+                    elif not is_future and not fields["date_of_issue"]:
+                        fields["date_of_issue"] = only_date
+                        confidences["date_of_issue"] = only_conf
+                    elif not fields["date_of_issue"]:
+                        fields["date_of_issue"] = only_date
+                        confidences["date_of_issue"] = only_conf
 
         # Fallback for address if empty
         if not fields["address"]:

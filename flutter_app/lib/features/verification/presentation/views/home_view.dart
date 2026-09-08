@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,6 +34,7 @@ class _HomeViewState extends ConsumerState<HomeView>
   List<dynamic>? _recentActivity;
 
   late final AnimationController _entranceController;
+  Timer? _statsPollTimer;
 
   @override
   void initState() {
@@ -46,6 +48,16 @@ class _HomeViewState extends ConsumerState<HomeView>
       _fetchOccupancy();
       _fetchRecentActivity();
     }
+    // The "Pending" count can otherwise go stale for as long as a
+    // verification stays half-finished — e.g. the user starts a scan,
+    // then backgrounds the app or backs out without hitting finalize, so
+    // the route never pops and _refreshAll() (below) never fires. Poll
+    // periodically so it self-corrects within a few seconds instead of
+    // being frozen until the next manual pull-to-refresh.
+    _statsPollTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _fetchStats(),
+    );
   }
 
   @override
@@ -62,6 +74,7 @@ class _HomeViewState extends ConsumerState<HomeView>
 
   @override
   void dispose() {
+    _statsPollTimer?.cancel();
     _entranceController.dispose();
     super.dispose();
   }

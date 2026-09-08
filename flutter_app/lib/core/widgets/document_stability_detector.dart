@@ -39,6 +39,15 @@ class DocumentStabilityDetector {
   double? _lastMeanLuma;
   int _stableStreak = 0;
 
+  /// Sharpness (mean absolute horizontal gradient over the same coarse
+  /// luma grid used for stability) of the most recently sampled frame —
+  /// a stationary phone can still be out of focus (auto-focus still
+  /// hunting, macro distance too close), so "stable" alone doesn't mean
+  /// "sharp." Read by the caller at the moment [onStable] fires to decide
+  /// whether to accept the capture or prompt a retake.
+  double? get lastSharpness => _lastSharpness;
+  double? _lastSharpness;
+
   DocumentStabilityDetector({
     required this.controller,
     required this.onStable,
@@ -51,6 +60,7 @@ class DocumentStabilityDetector {
     _isStreaming = true;
     _hasFired = false;
     _lastMeanLuma = null;
+    _lastSharpness = null;
     _stableStreak = 0;
     controller.startImageStream(_onFrame);
   }
@@ -77,7 +87,9 @@ class DocumentStabilityDetector {
   void _onFrame(CameraImage image) {
     if (_hasFired || image.planes.isEmpty) return;
 
-    final meanLuma = _sampledMeanLuma(image.planes.first.bytes, image.width, image.height, image.planes.first.bytesPerRow);
+    final yPlane = image.planes.first;
+    final meanLuma = _sampledMeanLuma(yPlane.bytes, image.width, image.height, yPlane.bytesPerRow);
+    _lastSharpness = _sampledSharpness(yPlane.bytes, image.width, image.height, yPlane.bytesPerRow);
 
     final last = _lastMeanLuma;
     _lastMeanLuma = meanLuma;
@@ -112,6 +124,35 @@ class DocumentStabilityDetector {
         if (index >= yPlane.length) break;
         sum += yPlane[index];
         count++;
+      }
+    }
+    return count == 0 ? 0 : sum / count;
+  }
+
+  /// Cheap focus proxy: mean absolute luma difference between
+  /// horizontally-adjacent sampled pixels over the same coarse grid used
+  /// by [_sampledMeanLuma]. A sharp, in-focus image has strong local
+  /// edges (high gradient); a blurry/out-of-focus one smears them out
+  /// (low gradient) — this is a simplified single-axis stand-in for a
+  /// full Laplacian-variance blur score, cheap enough to run on every
+  /// streamed frame on a mid-range device.
+  double _sampledSharpness(Uint8List yPlane, int width, int height, int bytesPerRow) {
+    const stride = 8;
+    int sum = 0;
+    int count = 0;
+    for (int y = 0; y < height; y += stride) {
+      final rowStart = y * bytesPerRow;
+      if (rowStart >= yPlane.length) break;
+      int? prev;
+      for (int x = 0; x < width; x += stride) {
+        final index = rowStart + x;
+        if (index >= yPlane.length) break;
+        final val = yPlane[index];
+        if (prev != null) {
+          sum += (val - prev).abs();
+          count++;
+        }
+        prev = val;
       }
     }
     return count == 0 ? 0 : sum / count;
