@@ -178,19 +178,34 @@ class _OCRReviewViewState extends State<OCRReviewView> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          // A timeout means the server was still working (document/face
-          // scanning runs real ML inference and can legitimately take a
-          // while, especially on a cold-started or CPU-only backend) —
-          // distinct from an actual bad/illegible photo, so it gets its
-          // own message rather than the generic "could not read" one,
-          // which reads as if the photo itself was rejected.
-          final isTimeout = e is DioException &&
-              (e.type == DioExceptionType.receiveTimeout ||
-                  e.type == DioExceptionType.sendTimeout ||
-                  e.type == DioExceptionType.connectionTimeout);
-          _error = isTimeout
-              ? 'The verification service is taking longer than usual. Please try again.'
-              : 'Could not read this document. Please try again.';
+          String errorMessage;
+          if (e is DioException) {
+            if (e.type == DioExceptionType.receiveTimeout ||
+                e.type == DioExceptionType.sendTimeout ||
+                e.type == DioExceptionType.connectionTimeout) {
+              errorMessage =
+                  'The verification service is taking longer than usual. Please try again.';
+            } else if (e.response?.data != null) {
+              final data = e.response!.data;
+              if (data is Map && data['detail'] != null) {
+                errorMessage = data['detail'].toString();
+              } else if (data is Map && data['message'] != null) {
+                errorMessage = data['message'].toString();
+              } else {
+                errorMessage =
+                    'Could not read this document. Please ensure the card is clear and well-lit.';
+              }
+            } else if (e.type == DioExceptionType.connectionError) {
+              errorMessage =
+                  'Unable to connect to the verification server. Please check your connection.';
+            } else {
+              errorMessage =
+                  'Could not read this document. Please check the lighting and try again.';
+            }
+          } else {
+            errorMessage = 'Could not read this document. Please try again.';
+          }
+          _error = errorMessage;
           _isLoading = false;
         });
       }
@@ -218,7 +233,11 @@ class _OCRReviewViewState extends State<OCRReviewView> {
       body: _isLoading
           ? _LoadingState(message: _loadingMessages[_loadingMessageIndex])
           : _error != null
-          ? _ErrorState(message: _error!, onRetry: _processDocument)
+          ? _ErrorState(
+              message: _error!,
+              onRetry: _processDocument,
+              onRetake: () => Navigator.of(context).pop(),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
               child: Column(
@@ -230,13 +249,17 @@ class _OCRReviewViewState extends State<OCRReviewView> {
                     label: 'Review Details',
                   ),
                   const SizedBox(height: 18),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    clipBehavior: Clip.antiAlias,
                     child: AspectRatio(
                       aspectRatio: 1.58,
                       child: Image.file(
                         File(widget.imagePath),
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),
@@ -470,8 +493,13 @@ class _LoadingState extends StatelessWidget {
 class _ErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final VoidCallback onRetake;
 
-  const _ErrorState({required this.message, required this.onRetry});
+  const _ErrorState({
+    required this.message,
+    required this.onRetry,
+    required this.onRetake,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -504,11 +532,22 @@ class _ErrorState extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Try Again'),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onRetake,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                    label: const Text('Retake Photo'),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Try Again'),
+                  ),
+                ],
               ),
             ],
           ),

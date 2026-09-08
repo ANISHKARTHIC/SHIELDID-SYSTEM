@@ -727,7 +727,11 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 confidences[k] = 0.0
             elif confidences[k] == 0.0:
                 confidences[k] = 90.0 # Default fallback confidence
-                
+
+        # Recalculate average confidence of critical fields after autocomplete and fallback normalization
+        critical_confs = [confidences[k] for k in critical_keys if fields.get(k) and confidences.get(k, 0) > 0]
+        avg_critical_conf = sum(critical_confs) / len(critical_confs) if critical_confs else 50.0
+
         return {
             "document_type": "uk_driving_licence",
             "fields": fields,
@@ -735,3 +739,4 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             "validation": validation_result,
             "avg_critical_conf": avg_critical_conf
         }
+

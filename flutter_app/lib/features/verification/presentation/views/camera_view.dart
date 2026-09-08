@@ -20,6 +20,8 @@ class _CameraViewState extends State<CameraView> {
   DocumentStabilityDetector? _stabilityDetector;
   bool _isCameraInitialized = false;
   bool _isCapturing = false;
+  bool _autoCaptureEnabled = false;
+  double _stabilityProgress = 0.0;
   String? _error;
   final _scaffoldKey = GlobalKey<CameraCaptureScaffoldState>();
 
@@ -50,9 +52,7 @@ class _CameraViewState extends State<CameraView> {
       return;
     }
 
-    // Document scanning always needs the back camera — `cameras.first`
-    // isn't guaranteed to be the back lens on every device/plugin build,
-    // so select it explicitly instead of relying on list ordering.
+    // Document scanning always needs the back camera
     final backCamera = cameras.firstWhere(
       (c) => c.lensDirection == CameraLensDirection.back,
       orElse: () => cameras.first,
@@ -73,15 +73,20 @@ class _CameraViewState extends State<CameraView> {
         setState(() {
           _isCameraInitialized = true;
         });
-        // Auto-capture: fires once the framed scene holds steady for
-        // ~0.8s, which reads as "document is in frame and the phone has
-        // stopped moving" without needing real document/edge detection.
-        // Manual shutter tap still works at any time — whichever fires
-        // first wins, guarded by _isCapturing below.
+
         _stabilityDetector = DocumentStabilityDetector(
           controller: _controller!,
           onStable: _onDocumentStable,
-        )..start();
+          onProgress: (progress) {
+            if (mounted && _autoCaptureEnabled) {
+              setState(() => _stabilityProgress = progress);
+            }
+          },
+        );
+
+        if (_autoCaptureEnabled) {
+          _stabilityDetector?.start();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -89,6 +94,19 @@ class _CameraViewState extends State<CameraView> {
           () => _error = 'Could not start the camera. Please try again.',
         );
       }
+    }
+  }
+
+  void _toggleAutoCapture() {
+    setState(() {
+      _autoCaptureEnabled = !_autoCaptureEnabled;
+      _stabilityProgress = 0.0;
+    });
+    if (_autoCaptureEnabled) {
+      _stabilityDetector?.reset();
+      _stabilityDetector?.start();
+    } else {
+      _stabilityDetector?.stop();
     }
   }
 
@@ -100,24 +118,12 @@ class _CameraViewState extends State<CameraView> {
   }
 
   void _onDocumentStable() {
-    if (_isCapturing || !mounted) return;
-    // Auto-capture has no tap to hang the usual haptic+flash feedback
-    // off of — trigger it explicitly so it's just as visible/felt as a
-    // manual shutter press, instead of silently jumping to the review
-    // screen with no confirmation a photo was taken at all.
+    if (_isCapturing || !_autoCaptureEnabled || !mounted) return;
     _scaffoldKey.currentState?.triggerCaptureFeedback();
     _takePicture(checkSharpness: true);
   }
 
-  /// Below this mean-gradient score the frame is treated as too blurry to
-  /// send straight to OCR — tuned against real captures: a sharp,
-  /// in-focus document scan reads comfortably above 10 on this scale,
-  /// while a blurry/motion-smeared one reads under 4-5. Only gates the
-  /// auto-capture path (see [_takePicture]'s `checkSharpness` param) since
-  /// the stability detector's image stream — the only source for this
-  /// score — isn't running for a manual shutter tap that fires before
-  /// stability was reached.
-  static const _minAcceptableSharpness = 6.0;
+  static const _minAcceptableSharpness = 5.5;
 
   Future<void> _takePicture({bool checkSharpness = false}) async {
     if (_controller == null || !_controller!.value.isInitialized) return;
@@ -127,44 +133,27 @@ class _CameraViewState extends State<CameraView> {
     final sharpness = _stabilityDetector?.lastSharpness;
 
     try {
-      // takePicture() can't run while the image stream (used for
-      // auto-capture stability detection) is active on most platforms —
-      // stop it first, whether this capture was triggered by the
-      // detector itself or a manual shutter tap.
       await _stabilityDetector?.stop();
 
+      // If auto-capture triggered on a blurry frame, quietly reset and wait
+      // rather than showing an intrusive popup dialog.
       if (checkSharpness &&
           sharpness != null &&
           sharpness < _minAcceptableSharpness) {
-        // Stable (motion-wise) but still out of focus — e.g. auto-focus
-        // still hunting, or held too close. Skip the capture entirely and
-        // let the detector keep watching rather than snapping a photo
-        // that's just going to fail OCR downstream.
         if (mounted) {
-          setState(() => _isCapturing = false);
-          _stabilityDetector?.reset();
-          _stabilityDetector?.start();
+          setState(() {
+            _isCapturing = false;
+            _stabilityProgress = 0.0;
+          });
+          if (_autoCaptureEnabled) {
+            _stabilityDetector?.reset();
+            _stabilityDetector?.start();
+          }
         }
         return;
       }
 
       final image = await _controller!.takePicture();
-
-      if (checkSharpness &&
-          sharpness != null &&
-          sharpness < _minAcceptableSharpness * 1.5 &&
-          mounted) {
-        final shouldRetake = await _confirmBlurryCapture();
-        if (shouldRetake == true) {
-          if (mounted) {
-            setState(() => _isCapturing = false);
-            _stabilityDetector?.reset();
-            _stabilityDetector?.start();
-          }
-          return;
-        }
-      }
-
       await _navigateToReview(image.path);
     } catch (e) {
       if (mounted) {
@@ -172,41 +161,16 @@ class _CameraViewState extends State<CameraView> {
       }
     } finally {
       if (mounted) {
-        setState(() => _isCapturing = false);
-        _stabilityDetector?.reset();
-        _stabilityDetector?.start();
+        setState(() {
+          _isCapturing = false;
+          _stabilityProgress = 0.0;
+        });
+        if (_autoCaptureEnabled) {
+          _stabilityDetector?.reset();
+          _stabilityDetector?.start();
+        }
       }
     }
-  }
-
-  /// Manual clarity gate for a borderline-sharp auto-capture: shows the
-  /// captured photo and asks staff to confirm it's legible rather than
-  /// silently sending a marginal photo straight to OCR (which is where a
-  /// soft-focus capture actually surfaces as a failed/garbled extraction
-  /// several seconds later, far from the moment it could cheaply be
-  /// retaken).
-  Future<bool?> _confirmBlurryCapture() {
-    return showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Photo may be blurry'),
-        content: const Text(
-          'This capture looks a little out of focus, which can cause '
-          'incorrect data extraction. Use it anyway, or retake?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Retake'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Use Photo'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _pickImage() async {
@@ -225,9 +189,14 @@ class _CameraViewState extends State<CameraView> {
         }
       } finally {
         if (mounted) {
-          setState(() => _isCapturing = false);
-          _stabilityDetector?.reset();
-          _stabilityDetector?.start();
+          setState(() {
+            _isCapturing = false;
+            _stabilityProgress = 0.0;
+          });
+          if (_autoCaptureEnabled) {
+            _stabilityDetector?.reset();
+            _stabilityDetector?.start();
+          }
         }
       }
     }
@@ -249,7 +218,9 @@ class _CameraViewState extends State<CameraView> {
       key: _scaffoldKey,
       controller: _controller,
       isInitializing: !_isCameraInitialized,
-      instructionText: 'Hold steady — captures automatically when aligned',
+      instructionText: _autoCaptureEnabled
+          ? 'Hold steady — captures automatically when aligned'
+          : 'Align ID in frame and tap shutter to capture',
       errorText: _error,
       currentStep: 1,
       totalSteps: 3,
@@ -257,6 +228,9 @@ class _CameraViewState extends State<CameraView> {
       onCapture: _takePicture,
       onPickFromGallery: _pickImage,
       onClose: () => Navigator.pop(context),
+      isAutoCaptureEnabled: _autoCaptureEnabled,
+      onToggleAutoCapture: _toggleAutoCapture,
+      stabilityProgress: _stabilityProgress,
     );
   }
 }

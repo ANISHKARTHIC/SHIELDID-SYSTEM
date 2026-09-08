@@ -49,7 +49,7 @@ class OccupancyService:
         )
         if not record:
             return None
-        return self.check_out(db, record.id, checked_out_by_id)
+        return self.check_out(db, record.id, checked_out_by_id, venue_id)
 
 
 occupancy_service = OccupancyService()

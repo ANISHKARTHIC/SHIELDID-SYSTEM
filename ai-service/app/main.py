@@ -213,6 +213,19 @@ async def extract_ocr_endpoint(file: UploadFile = File(...), document_type: str 
     from app.services.data_validation import validate_extracted_data
     validation = validate_extracted_data(ocr_result)
 
+    doc_validation = ocr_result.get("validation", {})
+    if doc_validation:
+        if not doc_validation.get("is_valid", True):
+            validation["is_valid"] = False
+        doc_errors = doc_validation.get("errors", [])
+        if "errors" not in validation:
+            validation["errors"] = []
+        for err in doc_errors:
+            if err not in validation["errors"]:
+                validation["errors"].append(err)
+        if doc_validation.get("warnings"):
+            validation["warnings"] = doc_validation.get("warnings")
+
     return {
         "success": True,
         "extracted_data": ocr_result,

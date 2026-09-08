@@ -3,65 +3,63 @@ import 'dart:typed_data';
 import 'package:camera/camera.dart';
 
 /// Lightweight on-device "hold it steady" auto-capture trigger for the
-/// document scan screen — not real document/rectangle detection (that
-/// needs real CV inference and a much heavier plugin/model), but a cheap
-/// stability heuristic that approximates "a document is framed and the
-/// camera has stopped moving," which is what actually matters for a
-/// clean capture. Costs one downsampled luma-plane diff per frame, no
-/// image decode/allocation beyond that — safe to run continuously on a
-/// mid-range Android device.
+/// document scan screen.
 ///
-/// How it works: samples the Y (luminance) plane of each YUV420 camera
-/// frame at a coarse stride (every 8th pixel — plenty to detect motion,
-/// far cheaper than a full-resolution diff), compares mean luma against
-/// the previous sampled frame, and treats the frame as "stable" when the
-/// change is below [stabilityThreshold]. Once [requiredStableFrames]
-/// consecutive frames are stable, [onStable] fires exactly once (call
-/// [reset] to re-arm after handling it, e.g. after a capture completes or
-/// the guide frame is left).
+/// Unlike naive whole-frame average brightness (which doesn't detect
+/// camera panning or translation across a table), this samples a coarse grid
+/// of luminance values and calculates the Mean Absolute Difference (MAD)
+/// across corresponding pixels between consecutive frames:
+///   MAD = sum(|I_t(x,y) - I_{t-1}(x,y)|) / N
+/// Panning or moving the phone results in high MAD (> 12-40), while holding
+/// the phone still over the document drops MAD below [stabilityThreshold] (< 4.5).
+///
+/// Includes an initial settling delay so opening the camera never snaps
+/// prematurely, and reports [onProgress] (0.0 -> 1.0) so the UI can show
+/// the user visual locking progress.
 class DocumentStabilityDetector {
   final CameraController controller;
   final void Function() onStable;
+  final void Function(double progress)? onProgress;
 
-  /// Mean-luma delta (0-255 scale) below which two consecutive frames
-  /// count as "the same" — tuned loose enough to tolerate sensor noise on
-  /// a static scene but tight enough to reject a hand still moving the
-  /// phone into position.
+  /// Mean Absolute Difference threshold (0-255 scale) below which two
+  /// consecutive sampled frames are treated as stationary.
   final double stabilityThreshold;
 
-  /// How many consecutive stable frames are required before firing —
-  /// at the camera's frame rate this is roughly requiredStableFrames/30s,
-  /// e.g. 24 frames ≈ 0.8s of hold-still.
+  /// How many consecutive stable frames are required before firing (~1s at 30fps).
   final int requiredStableFrames;
+
+  /// Grace period in frames before stability counting begins (~1.0s at 30fps)
+  /// so opening the camera gives the user time to position the document.
+  final int initialSettlingFrames;
 
   bool _isStreaming = false;
   bool _hasFired = false;
-  double? _lastMeanLuma;
+  Uint8List? _lastSampledGrid;
   int _stableStreak = 0;
+  int _totalFramesSeen = 0;
 
-  /// Sharpness (mean absolute horizontal gradient over the same coarse
-  /// luma grid used for stability) of the most recently sampled frame —
-  /// a stationary phone can still be out of focus (auto-focus still
-  /// hunting, macro distance too close), so "stable" alone doesn't mean
-  /// "sharp." Read by the caller at the moment [onStable] fires to decide
-  /// whether to accept the capture or prompt a retake.
+  /// Sharpness (mean absolute horizontal gradient) of the most recently sampled frame.
   double? get lastSharpness => _lastSharpness;
   double? _lastSharpness;
 
   DocumentStabilityDetector({
     required this.controller,
     required this.onStable,
-    this.stabilityThreshold = 2.5,
-    this.requiredStableFrames = 24,
+    this.onProgress,
+    this.stabilityThreshold = 4.5,
+    this.requiredStableFrames = 28,
+    this.initialSettlingFrames = 24,
   });
 
   void start() {
     if (_isStreaming || !controller.value.isInitialized) return;
     _isStreaming = true;
     _hasFired = false;
-    _lastMeanLuma = null;
+    _lastSampledGrid = null;
     _lastSharpness = null;
     _stableStreak = 0;
+    _totalFramesSeen = 0;
+    onProgress?.call(0.0);
     controller.startImageStream(_onFrame);
   }
 
@@ -70,37 +68,56 @@ class DocumentStabilityDetector {
     _isStreaming = false;
     try {
       await controller.stopImageStream();
-    } catch (_) {
-      // Controller may already be mid-dispose (e.g. screen popped while a
-      // frame callback was in flight) — nothing to clean up in that case.
-    }
+    } catch (_) {}
+    onProgress?.call(0.0);
   }
 
-  /// Re-arms detection for another capture without restarting the stream
-  /// (e.g. after the user retakes, or after this fired once).
+  /// Re-arms detection for another capture without restarting the stream.
   void reset() {
     _hasFired = false;
-    _lastMeanLuma = null;
+    _lastSampledGrid = null;
     _stableStreak = 0;
+    _totalFramesSeen = 0;
+    onProgress?.call(0.0);
   }
 
   void _onFrame(CameraImage image) {
     if (_hasFired || image.planes.isEmpty) return;
 
     final yPlane = image.planes.first;
-    final meanLuma = _sampledMeanLuma(yPlane.bytes, image.width, image.height, yPlane.bytesPerRow);
-    _lastSharpness = _sampledSharpness(yPlane.bytes, image.width, image.height, yPlane.bytesPerRow);
+    final currentGrid = _sampleGrid(
+      yPlane.bytes,
+      image.width,
+      image.height,
+      yPlane.bytesPerRow,
+    );
+    _lastSharpness = _sampledSharpness(
+      yPlane.bytes,
+      image.width,
+      image.height,
+      yPlane.bytesPerRow,
+    );
 
-    final last = _lastMeanLuma;
-    _lastMeanLuma = meanLuma;
-    if (last == null) return;
+    _totalFramesSeen++;
+    final prevGrid = _lastSampledGrid;
+    _lastSampledGrid = currentGrid;
 
-    final delta = (meanLuma - last).abs();
-    if (delta < stabilityThreshold) {
+    if (prevGrid == null || _totalFramesSeen < initialSettlingFrames) {
+      onProgress?.call(0.0);
+      return;
+    }
+
+    final mad = _computeMAD(currentGrid, prevGrid);
+
+    if (mad < stabilityThreshold) {
       _stableStreak++;
     } else {
-      _stableStreak = 0;
+      // If motion detected, quickly decay rather than instant zero to avoid jitter
+      _stableStreak = (_stableStreak > 3) ? _stableStreak - 3 : 0;
     }
+
+    final progress = (_stableStreak / requiredStableFrames).clamp(0.0, 1.0);
+    onProgress?.call(progress);
 
     if (_stableStreak >= requiredStableFrames) {
       _hasFired = true;
@@ -108,34 +125,41 @@ class DocumentStabilityDetector {
     }
   }
 
-  /// Mean luma over a coarse grid (every 8th pixel in both dimensions) —
-  /// O(width/8 * height/8) instead of a full-resolution pass, which is
-  /// the difference between "runs fine on every frame" and "drops frames
-  /// on a mid-range device."
-  double _sampledMeanLuma(Uint8List yPlane, int width, int height, int bytesPerRow) {
-    const stride = 8;
-    int sum = 0;
-    int count = 0;
+  /// Samples a downsampled 1D array of luma points (stride = 16)
+  /// For 1280x720, this creates ~3,600 bytes, which is extremely lightweight.
+  Uint8List _sampleGrid(Uint8List yPlane, int width, int height, int bytesPerRow) {
+    const stride = 16;
+    final gridWidth = (width + stride - 1) ~/ stride;
+    final gridHeight = (height + stride - 1) ~/ stride;
+    final buffer = Uint8List(gridWidth * gridHeight);
+
+    int idx = 0;
     for (int y = 0; y < height; y += stride) {
       final rowStart = y * bytesPerRow;
       if (rowStart >= yPlane.length) break;
       for (int x = 0; x < width; x += stride) {
-        final index = rowStart + x;
-        if (index >= yPlane.length) break;
-        sum += yPlane[index];
-        count++;
+        final pos = rowStart + x;
+        if (pos < yPlane.length && idx < buffer.length) {
+          buffer[idx++] = yPlane[pos];
+        }
       }
     }
-    return count == 0 ? 0 : sum / count;
+    return buffer;
   }
 
-  /// Cheap focus proxy: mean absolute luma difference between
-  /// horizontally-adjacent sampled pixels over the same coarse grid used
-  /// by [_sampledMeanLuma]. A sharp, in-focus image has strong local
-  /// edges (high gradient); a blurry/out-of-focus one smears them out
-  /// (low gradient) — this is a simplified single-axis stand-in for a
-  /// full Laplacian-variance blur score, cheap enough to run on every
-  /// streamed frame on a mid-range device.
+  /// Computes Mean Absolute Difference between two sampled grids of identical length.
+  double _computeMAD(Uint8List a, Uint8List b) {
+    final len = a.length < b.length ? a.length : b.length;
+    if (len == 0) return 999.0;
+
+    int diffSum = 0;
+    for (int i = 0; i < len; i++) {
+      diffSum += (a[i] - b[i]).abs();
+    }
+    return diffSum / len;
+  }
+
+  /// Mean absolute horizontal gradient over a coarse grid as a focus proxy.
   double _sampledSharpness(Uint8List yPlane, int width, int height, int bytesPerRow) {
     const stride = 8;
     int sum = 0;

@@ -148,19 +148,14 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
         final venueCheck = result['venue_check'] as Map<String, dynamic>? ?? {};
         final isBlacklisted = venueCheck['blacklisted'] == true;
         final incidentCount = (venueCheck['incidents'] as num?)?.toInt() ?? 0;
+        final double? riskScore = (result['risk_score'] as num?)?.toDouble();
 
-        // Only real, backend-sourced signals are shown — no fabricated
-        // confidence numbers or hand-authored explanation text. The
-        // response shape today doesn't include a numeric risk score (see
-        // TODO in decision_view.dart), so riskScore is left null.
-        final String reason;
-        if (isBlacklisted) {
-          reason = 'Visitor has an active venue restriction.';
-        } else if (decision == 'CHECK') {
-          reason = 'Document details need supervisor review.';
-        } else {
-          reason = 'Face captured and no venue restriction was found.';
-        }
+        final String? serverReason = result['reason'] as String?;
+        final String reason = serverReason ?? (isBlacklisted
+            ? 'Visitor has an active venue restriction.'
+            : (decision == 'CHECK'
+                ? 'Document details need supervisor review.'
+                : 'Face captured and no venue restriction was found.'));
 
         if (mounted) {
           Navigator.of(context).push(
@@ -168,6 +163,7 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
               DecisionView(
                 decision: decision,
                 reason: reason,
+                riskScore: riskScore,
                 isBlacklisted: isBlacklisted,
                 incidentCount: incidentCount,
                 sessionId: widget.sessionId,

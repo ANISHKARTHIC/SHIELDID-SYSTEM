@@ -130,6 +130,8 @@ async def scan_document(
 
         session_data["id_image"] = object_name
         session_data["classification"] = classification
+        if classification.get("face_embedding"):
+            session_data["id_face_embedding"] = classification["face_embedding"]
         # step 2 (classified) is transient within this single call — no
         # client round-trip happens between classify and OCR anymore, so
         # this only matters if the OCR call below fails partway through
@@ -234,14 +236,16 @@ async def face_match(
         pass
 
     # Look up any existing customer by document number so we can pass their
-    # stored face embedding as a real comparison reference, rather than
-    # always returning a placeholder similarity of 0.0.
+    # stored face embedding as a real comparison reference, falling back to
+    # the embedding extracted from the ID document itself for first-time visitors.
     ocr = session_data["ocr"]
     unique_id = ocr.get("document_number")
-    customer = db.query(Customer).filter(Customer.unique_id == unique_id).first()
+    customer = db.query(Customer).filter(Customer.unique_id == unique_id).first() if unique_id else None
     reference_embedding = None
     if customer is not None and customer.face_embedding is not None:
         reference_embedding = json.dumps([float(x) for x in customer.face_embedding])
+    elif session_data.get("id_face_embedding"):
+        reference_embedding = json.dumps([float(x) for x in session_data["id_face_embedding"]])
 
     ai_url = get_ai_service_url()
     async with httpx.AsyncClient() as client:
@@ -309,35 +313,61 @@ async def face_match(
             if blacklisted:
                 decision = "BLOCKED"
                 explainability["policy_trigger"] = "BLACKLIST"
-                session_service.update_session_data(db, session_id, {"final_decision": "blocked", "customer_id": customer.id})
+                reason = "Customer is on the venue blacklist."
+                risk_score = 1.0
+                session_service.update_session_data(db, session_id, {"final_decision": "blocked", "customer_id": customer.id if customer else None})
                 session_service.transition_state(db, session_id, SessionStateEnum.DENIED)
                 # Known repeat offender caught mid-session — move this and
                 # any past session's images into banned/ immediately.
-                session_service.quarantine_customer_images(db, customer.id)
+                if customer:
+                    session_service.quarantine_customer_images(db, customer.id)
             elif not session_data["validation"].get("is_valid"):
                 decision = "CHECK"
                 explainability["policy_trigger"] = "INVALID_DOCUMENT"
+                reason = "Document failed critical authenticity or format validation."
+                risk_score = 0.85
             elif not meets_minimum_age:
                 decision = "DENY"
                 explainability["policy_trigger"] = "UNDERAGE"
+                reason = f"Visitor age ({age if age is not None else 'Unknown'}) is under the minimum age requirement ({policy.minimum_age})."
+                risk_score = 1.0
+            elif quality_score < policy.quality_threshold * 100:
+                decision = "CHECK"
+                explainability["policy_trigger"] = "LOW_IMAGE_QUALITY"
+                reason = f"Image quality ({quality_score:.1f}%) is below venue requirement ({policy.quality_threshold * 100:.0f}%)."
+                risk_score = 0.60
             elif ocr_confidence < policy.ocr_confidence_threshold * 100:
                 decision = "CHECK"
                 explainability["policy_trigger"] = "LOW_OCR_CONFIDENCE"
-            elif policy.require_face_match and (face_similarity is None or face_similarity < policy.face_similarity_threshold):
+                reason = f"OCR confidence ({ocr_confidence:.1f}%) is below venue requirement ({policy.ocr_confidence_threshold * 100:.0f}%)."
+                risk_score = 0.50
+            elif policy.require_face_match and face_similarity is None:
+                decision = "CHECK"
+                explainability["policy_trigger"] = "NO_REFERENCE_FACE"
+                reason = "No reference face photo found on document for comparison."
+                risk_score = 0.50
+            elif policy.require_face_match and face_similarity < policy.face_similarity_threshold:
                 decision = "CHECK"
                 explainability["policy_trigger"] = "FACE_MISMATCH"
+                reason = f"Face similarity ({face_similarity * 100:.1f}%) is below venue requirement ({policy.face_similarity_threshold * 100:.0f}%)."
+                risk_score = 0.70
             else:
                 decision = "PASS"
+                explainability["policy_trigger"] = "PASS"
+                reason = "All identity, document, and venue policy checks passed."
+                risk_score = round(max(0.0, (1.0 - (face_similarity if face_similarity is not None else 1.0)) * 0.2), 3)
 
             session_data["decision"] = decision
             session_data["explainability"] = explainability
+            session_data["risk_score"] = risk_score
+            session_data["reason"] = reason
             session_data["step"] = 4
             redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
 
             try:
                 session_service.update_session_data(db, session_id, {
                     "face_similarity": face_similarity,
-                    "risk_score": 1.0 if blacklisted else (0.5 if decision == "CHECK" else 0.0),
+                    "risk_score": risk_score,
                     "explainability_report": explainability
                 })
                 session_service.transition_state(db, session_id, SessionStateEnum.FACE_VERIFIED)
@@ -347,6 +377,11 @@ async def face_match(
             return {
                 "success": True,
                 "decision": decision,
+                "risk_score": risk_score,
+                "face_similarity": face_similarity,
+                "policy_trigger": explainability["policy_trigger"],
+                "reason": reason,
+                "explainability": explainability,
                 "venue_check": session_data["venue_check"]
             }
         elif response.status_code == 422:
@@ -444,6 +479,23 @@ async def finalize_session(
         db.add(customer)
         db.commit()
         db.refresh(customer)
+    else:
+        # Returning visitor: extend data retention window from this visit
+        venue_config = venue_service.get_venue_configuration(db, current_user.venue_id)
+        retention_days = (
+            venue_config.retention_days_success
+            if final_decision_str == "pass"
+            else venue_config.retention_days_manual
+        )
+        new_expires = datetime.now(timezone.utc) + timedelta(days=retention_days)
+        cur_expires = customer.expires_at
+        if cur_expires is not None and cur_expires.tzinfo is None:
+            cur_expires = cur_expires.replace(tzinfo=timezone.utc)
+        if cur_expires is None or cur_expires < new_expires:
+            customer.expires_at = new_expires
+        if session_data.get("embedding"):
+            customer.face_embedding = session_data.get("embedding")
+        db.commit()
 
     # Persist the real OCR extraction as a Document row so the admin
     # console (GET /visitors) can show the actual document type/number/
@@ -460,17 +512,30 @@ async def finalize_session(
             return None
 
     classification = session_data.get("classification", {})
-    document = Document(
-        customer_id=customer.id,
-        doc_type=ocr.get("document_type") or classification.get("document_type") or "other",
-        doc_number=unique_id,
-        expiry_date=_parse_doc_date(ocr.get("expiry_date")),
-        issue_date=_parse_doc_date(ocr.get("issue_date")),
-        nationality=ocr.get("nationality"),
-        extracted_data=ocr,
-    )
-    db.add(document)
-    db.commit()
+    existing_doc = db.query(Document).filter(
+        Document.customer_id == customer.id,
+        Document.doc_number == unique_id
+    ).first()
+    if existing_doc:
+        existing_doc.doc_type = ocr.get("document_type") or classification.get("document_type") or existing_doc.doc_type
+        existing_doc.expiry_date = _parse_doc_date(ocr.get("expiry_date")) or existing_doc.expiry_date
+        existing_doc.issue_date = _parse_doc_date(ocr.get("issue_date")) or existing_doc.issue_date
+        existing_doc.nationality = ocr.get("nationality") or existing_doc.nationality
+        existing_doc.extracted_data = ocr
+        db.commit()
+    else:
+        document = Document(
+            customer_id=customer.id,
+            doc_type=ocr.get("document_type") or classification.get("document_type") or "other",
+            doc_number=unique_id,
+            expiry_date=_parse_doc_date(ocr.get("expiry_date")),
+            issue_date=_parse_doc_date(ocr.get("issue_date")),
+            nationality=ocr.get("nationality"),
+            extracted_data=ocr,
+        )
+        db.add(document)
+        db.commit()
+
     new_ban_created = False
     if final_decision_str == "pass":
         final_state = SessionStateEnum.APPROVED
@@ -478,8 +543,12 @@ async def finalize_session(
         final_state = SessionStateEnum.DENIED
     elif final_decision_str in ["block", "restrict"]:
         final_state = SessionStateEnum.DENIED
-        # Create Blacklist record
-        existing_ban = db.query(Blacklist).filter(Blacklist.customer_id == customer.id).first()
+        # Create Blacklist record if not already actively banned
+        existing_ban = db.query(Blacklist).filter(
+            Blacklist.customer_id == customer.id
+        ).filter(
+            (Blacklist.expiry_date.is_(None)) | (Blacklist.expiry_date > datetime.now(timezone.utc))
+        ).first()
         if not existing_ban:
             new_ban = Blacklist(
                 customer_id=customer.id,
@@ -574,6 +643,16 @@ async def get_visitors(
         now = datetime.now(timezone.utc)
         age = (now.year - c.dob.year - ((now.month, now.day) < (c.dob.month, c.dob.day))) if c.dob else 0
         
+        # Check for active (non-expired) ban
+        active_ban = None
+        for b in c.blacklist:
+            b_exp = b.expiry_date
+            if b_exp and b_exp.tzinfo is None:
+                b_exp = b_exp.replace(tzinfo=timezone.utc)
+            if b.expiry_date is None or b_exp > now:
+                active_ban = b
+                break
+
         results.append({
             "id": str(c.id),
             "name": c.name or "Unknown",
@@ -585,8 +664,8 @@ async def get_visitors(
             "issueDate": latest_doc.issue_date.isoformat() if latest_doc and latest_doc.issue_date else "",
             "address": "",
             "nationality": latest_doc.nationality if latest_doc else "",
-            "blacklistStatus": "permanent" if c.blacklist else "none",
-            "blacklistReason": c.blacklist[0].reason if c.blacklist else "",
+            "blacklistStatus": ("permanent" if active_ban.expiry_date is None else "temporary") if active_ban else "none",
+            "blacklistReason": active_ban.reason if active_ban else "",
             "membership": c.membership[0].tier if c.membership else "None",
             "visitCount": len(c.sessions),
             "incidentsCount": len(c.incidents),
@@ -646,8 +725,11 @@ require_super_admin = RoleChecker([RoleEnum.super_admin])
 @router.post("/admin/flush", dependencies=[Depends(require_super_admin)])
 async def flush_data(db: Session = Depends(get_db)):
     """Flushes all visitors and session data EXCEPT blacklisted users."""
-    # Find all customer IDs that are blacklisted
-    blacklisted_ids_query = db.query(Blacklist.customer_id).distinct()
+    # Find all customer IDs that have active non-expired blacklists
+    now = datetime.now(timezone.utc)
+    blacklisted_ids_query = db.query(Blacklist.customer_id).filter(
+        (Blacklist.expiry_date.is_(None)) | (Blacklist.expiry_date > now)
+    ).distinct()
     blacklisted_ids = [row[0] for row in blacklisted_ids_query.all()]
     
     # Query expendable customers

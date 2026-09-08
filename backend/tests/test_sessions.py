@@ -246,5 +246,132 @@ class TestSessionEndpoints(unittest.TestCase):
         finally:
             db.close()
 
+    def test_face_match_with_id_face_embedding_fallback(self):
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+
+        from backend.db.redis import get_redis
+        doc_embedding = [0.15] * 512
+        session_state = {
+            "step": 3,
+            "status": "ready",
+            "session_id": session_id,
+            "ocr": {
+                "document_number": "NEWVISITOR12345",
+                "name": "BOB NEWMAN",
+                "dob": "1995-03-12",
+                "confidence": 95.0,
+            },
+            "classification": {
+                "document_type": "uk_driving_licence",
+                "type_confidence": 0.98,
+                "face_embedding": doc_embedding,
+            },
+            "id_face_embedding": doc_embedding,
+            "validation": {
+                "is_valid": True,
+                "age_verification": {"age": 30, "is_over_18": True},
+            },
+        }
+        next(get_redis()).set(f"session:{session_id}", json.dumps(session_state))
+
+        called_data = {}
+
+        async def fake_face_match(self, url, **kwargs):
+            called_data["url"] = url
+            called_data["data"] = kwargs.get("data", {})
+            response = MagicMock()
+            response.status_code = 200
+            response.json = lambda: {
+                "success": True,
+                "embedding": [0.16] * 512,
+                "similarity": 0.94,
+            }
+            return response
+
+        with patch("httpx.AsyncClient.post", new=fake_face_match):
+            res = client.post(
+                f"/api/v1/session/{session_id}/face",
+                files={"file": ("face.jpg", b"fake-face-bytes", "image/jpeg")},
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["decision"], "PASS")
+        self.assertEqual(data["policy_trigger"], "PASS")
+        self.assertAlmostEqual(data["face_similarity"], 0.94)
+        self.assertIn("risk_score", data)
+        self.assertIn("explainability", data)
+        self.assertEqual(data["explainability"]["policy_trigger"], "PASS")
+        # Verify that reference_embedding sent to AI service matched id_face_embedding
+        sent_ref = json.loads(called_data["data"]["reference_embedding"])
+        self.assertEqual(len(sent_ref), 512)
+        self.assertAlmostEqual(sent_ref[0], 0.15)
+
+    def test_finalize_session_extends_retention_for_returning_customer(self):
+        # Seed an existing customer with an old expiration date
+        from datetime import datetime, timezone, timedelta
+        db = TestingSessionLocal()
+        old_expires = datetime.now(timezone.utc) + timedelta(days=2)
+        try:
+            customer = Customer(
+                unique_id="RETURNING001",
+                name="RETURNING VISITOR",
+                dob=datetime(1990, 1, 1),
+                expires_at=old_expires,
+            )
+            db.add(customer)
+            db.commit()
+            db.refresh(customer)
+            customer_id = customer.id
+        finally:
+            db.close()
+
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        session_id = start_res.json()["session_id"]
+
+        from backend.db.redis import get_redis
+        session_state = {
+            "step": 4,
+            "status": "ready",
+            "session_id": session_id,
+            "ocr": {
+                "document_number": "RETURNING001",
+                "name": "RETURNING VISITOR",
+                "dob": "1990-01-01",
+                "document_type": "uk_driving_licence",
+                "expiry_date": "2030-01-01",
+                "issue_date": "2020-01-01",
+            },
+            "classification": {"document_type": "uk_driving_licence"},
+            "embedding": [0.3] * 512,
+            "validation": {"is_valid": True},
+        }
+        next(get_redis()).set(f"session:{session_id}", json.dumps(session_state))
+
+        res = client.post(
+            f"/api/v1/session/{session_id}/finalize",
+            json={"staff_decision": "PASS", "notes": "Welcome back"},
+            headers=self.headers,
+        )
+        self.assertEqual(res.status_code, 200)
+
+        db = TestingSessionLocal()
+        try:
+            updated_customer = db.query(Customer).filter(Customer.id == customer_id).first()
+            self.assertIsNotNone(updated_customer)
+            updated_expires = updated_customer.expires_at
+            if updated_expires.tzinfo is None:
+                updated_expires = updated_expires.replace(tzinfo=timezone.utc)
+            self.assertGreater(updated_expires, old_expires)
+            # Verify only 1 Document row exists for this customer
+            docs = db.query(Document).filter(Document.customer_id == customer_id).all()
+            self.assertEqual(len(docs), 1)
+        finally:
+            db.close()
+
 if __name__ == "__main__":
     unittest.main()
+

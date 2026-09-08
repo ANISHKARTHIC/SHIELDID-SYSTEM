@@ -27,6 +27,9 @@ class CameraCaptureScaffold extends StatefulWidget {
   final String? processingStatusText;
   final VoidCallback? onCancelProcessing;
   final VoidCallback? onSwitchCamera;
+  final bool? isAutoCaptureEnabled;
+  final VoidCallback? onToggleAutoCapture;
+  final double? stabilityProgress;
 
   const CameraCaptureScaffold({
     super.key,
@@ -47,6 +50,9 @@ class CameraCaptureScaffold extends StatefulWidget {
     this.processingStatusText,
     this.onCancelProcessing,
     this.onSwitchCamera,
+    this.isAutoCaptureEnabled,
+    this.onToggleAutoCapture,
+    this.stabilityProgress,
   });
 
   @override
@@ -231,7 +237,11 @@ class CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
               width: size.width * widget.guideWidthFactor,
               height: size.width * widget.guideHeightFactor,
               isOval: widget.isOvalGuide,
-              accentColor: accent,
+              accentColor: (widget.isAutoCaptureEnabled == true &&
+                      widget.stabilityProgress != null &&
+                      widget.stabilityProgress! > 0.4)
+                  ? context.colors.success
+                  : accent,
               isActive: !widget.isProcessing && !_showFlash,
             ),
           ),
@@ -264,6 +274,24 @@ class CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                           activeColor: Colors.white,
                         ),
                       ),
+                      if (widget.onToggleAutoCapture != null && !widget.isProcessing)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: _CircleIconButton(
+                            icon: (widget.isAutoCaptureEnabled ?? false)
+                                ? Icons.auto_awesome
+                                : Icons.touch_app_rounded,
+                            tooltip: (widget.isAutoCaptureEnabled ?? false)
+                                ? 'Auto-capture ON (tap for Manual)'
+                                : 'Manual mode (tap for Auto)',
+                            diameter: 44,
+                            iconSize: 20,
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              widget.onToggleAutoCapture!();
+                            },
+                          ),
+                        ),
                       if (widget.onSwitchCamera != null && !widget.isProcessing)
                         _CircleIconButton(
                           icon: Icons.cameraswitch_rounded,
@@ -275,7 +303,7 @@ class CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                             widget.onSwitchCamera!();
                           },
                         )
-                      else
+                      else if (widget.onToggleAutoCapture == null)
                         const SizedBox(width: 44),
                     ],
                   ),
@@ -297,13 +325,25 @@ class CameraCaptureScaffoldState extends State<CameraCaptureScaffold> {
                             width: 6,
                             height: 6,
                             decoration: BoxDecoration(
-                              color: context.colors.success,
+                              color: (widget.isAutoCaptureEnabled == true &&
+                                      widget.stabilityProgress != null &&
+                                      widget.stabilityProgress! > 0.1)
+                                  ? Color.lerp(
+                                      context.colors.warning,
+                                      context.colors.success,
+                                      widget.stabilityProgress!,
+                                    )
+                                  : context.colors.success,
                               shape: BoxShape.circle,
                             ),
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            widget.instructionText,
+                            (widget.isAutoCaptureEnabled == true &&
+                                    widget.stabilityProgress != null &&
+                                    widget.stabilityProgress! > 0.1)
+                                ? 'Holding steady… ${(widget.stabilityProgress! * 100).toInt()}%'
+                                : widget.instructionText,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
                               color: Colors.white,
