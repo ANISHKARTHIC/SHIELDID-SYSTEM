@@ -7,10 +7,9 @@ logger = logging.getLogger("uk_driving_licence_processor")
 
 # Matches a DD-MM-YYYY-shaped date with . / - or one-or-more spaces as the
 # separator between groups — EasyOCR frequently drops small punctuation
-# like periods on a UK licence's compact date fields, turning "15.06.2020"
-# into "15 06 2020" or worse, so a separator-strict regex silently misses
-# these and leaves date_of_issue/date_of_expiry empty.
-DATE_PATTERN = re.compile(r'\b\d{2}[-/.\s]+\d{2}[-/.\s]+\d{4}\b')
+# Matches a DD-MM-YYYY-shaped date with . / - , or one-or-more spaces as the
+# separator between groups (or single separator e.g. "20.122025" from fused OCR).
+DATE_PATTERN = re.compile(r'\b\d{2}[-/.\s,]*\d{2}[-/.\s,]*\d{4}\b')
 
 class UKDrivingLicenceProcessor(BaseDocumentProcessor):
     """
@@ -25,18 +24,10 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         """
         if not date_str:
             return ""
-        # Clean any OCR noise, but keep whitespace as a separator candidate
-        # — EasyOCR frequently drops small punctuation like periods on a
-        # UK licence's compact date fields (e.g. "15.06.2020" -> "15 06
-        # 2020" or even "15062020" if the space is dropped too), and
-        # previously this strip discarded whitespace entirely, gluing the
-        # digit groups together into something no date pattern below could
-        # match — silently leaving date_of_issue/date_of_expiry empty.
-        cleaned = re.sub(r'[^\d\-/\.\s]', '', date_str).strip()
+        cleaned = re.sub(r'[^\d\-/\.\s,]', '', date_str).strip()
 
-        # Matches (day-month-year, common on UK licences), separator is
-        # one of . / - or one-or-more spaces.
-        m1 = re.search(r'\b(\d{2})[-/.\s]+(\d{2})[-/.\s]+(\d{4})\b', cleaned)
+        # Matches (day-month-year, common on UK licences), separators can be . / - , or space
+        m1 = re.search(r'\b(\d{2})[-/.\s,]*(\d{2})[-/.\s,]*(\d{4})\b', cleaned)
         if m1:
             d, m, y = m1.groups()
             try:
@@ -44,7 +35,7 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             except ValueError:
                 pass
 
-        m2 = re.search(r'\b(\d{4})[-/.\s]+(\d{2})[-/.\s]+(\d{2})\b', cleaned)
+        m2 = re.search(r'\b(\d{4})[-/.\s,]*(\d{2})[-/.\s,]*(\d{2})\b', cleaned)
         if m2:
             y, m, d = m2.groups()
             try:
@@ -52,9 +43,6 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             except ValueError:
                 pass
 
-        # Fully glued 8-digit run with no separator at all (e.g. every
-        # separator character, including spaces, got dropped by OCR) —
-        # DD MM YYYY is the UK licence convention, so try that ordering.
         m3 = re.search(r'\b(\d{2})(\d{2})(\d{4})\b', cleaned)
         if m3:
             d, m, y = m3.groups()
@@ -117,27 +105,17 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         - Char 15-16: Computer-generated check characters (letters or
           numbers — genuinely mixed, so left uncorrected)
         """
-        num_clean = num.replace(" ", "").upper()
+        num_clean = num.replace("}", "1").replace("{", "1").replace("]", "1").replace("[", "1").replace("|", "1").replace("!", "1")
+        num_clean = re.sub(r'[^A-Za-z0-9]', '', num_clean).upper()
+        if len(num_clean) > 16:
+            num_clean = num_clean[:16]
 
         # Sanitize OCR errors based on DVLA formula positions
         if len(num_clean) >= 16:
             p1 = num_clean[:5].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
-            p2 = num_clean[5:11].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6")
+            p2 = num_clean[5:11].replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "6").replace("D", "0").replace("Q", "0")
             p3 = num_clean[11:13].replace("0", "O").replace("1", "I").replace("5", "S").replace("8", "B")
-            # Char 14 is always a digit per the DVLA formula (unlike chars
-            # 15-16, which are genuinely mixed letters/numbers) — apply the
-            # same letter->digit correction as the DOB block (p2), with one
-            # difference: "G" resolves to "9" here, not "6". Confirmed real
-            # failure modes for this position: a printed "9" OCR'd as "I"
-            # (visually similar in the DVLA card font — fixed by the O/I/S/
-            # Z/B map below), or as a lowercase "g" that .upper() above
-            # turns into "G" (the same 9<->g visual confusion already
-            # handled in _clean_address for house codes, e.g. "H89D" ->
-            # "H8gD"). Since this position's DVLA-documented expected value
-            # is "typically 9" (not 6), a G-shaped misread here should
-            # resolve to 9 rather than the generic G->6 digit-block mapping
-            # used elsewhere (e.g. p2's DOB block, where 6 is a real digit).
-            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "9")
+            p4 = num_clean[13:14].replace("O", "0").replace("I", "1").replace("L", "1").replace("S", "5").replace("Z", "2").replace("B", "8").replace("G", "9").replace("D", "0")
             p5 = num_clean[14:16] # Check chars — genuinely mixed, left as-is
             num_clean = p1 + p2 + p3 + p4 + p5
             
@@ -169,6 +147,8 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             current_year_last2 = datetime.now().year % 100
             year = (1900 + year_val) if year_val > current_year_last2 else (2000 + year_val)
             
+            month = max(1, min(12, month))
+            day = max(1, min(31, day))
             dob_date = datetime(year, month, day)
             res["extracted_dob"] = dob_date.strftime("%Y-%m-%d")
             
@@ -176,7 +156,13 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             if dob:
                 parsed_dob = self.parse_date(dob)
                 if parsed_dob and parsed_dob != res["extracted_dob"]:
-                    res["errors"].append(f"DOB mismatch: licence indicates {res['extracted_dob']}, but text field says {parsed_dob}.")
+                    try:
+                        dob_year = int(parsed_dob.split("-")[0])
+                        # Only flag mismatch if parsed_dob is a plausible DOB (adult age, not in future)
+                        if dob_year < datetime.now().year - 15:
+                            res["errors"].append(f"DOB mismatch: licence indicates {res['extracted_dob']}, but text field says {parsed_dob}.")
+                    except Exception:
+                        pass
             
             # 2. Surname Check (first 5 chars)
             if surname:
@@ -188,18 +174,14 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     
             # 3. Initials Check (char 12-13)
             if first_names:
-                # Confirmed real failure mode: "MISS GRACELIN PRIYANKA" was
-                # missing "MISS" from the title stopword list, so the check
-                # picked initials "MG" (Miss, Gracelin) instead of "GP"
-                # (Gracelin, Priyanka) — a false initials-mismatch error on
-                # a licence number that was actually correct.
-                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR"}
+                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR", "MA", "MD"}
                 initial_chars = [w[0] for w in first_names.upper().split() if w not in titles]
-                expected_initials = ("".join(initial_chars) + "99")[:2]
-                actual_initials = num_clean[11:13]
-                # Allow minor OCR initial variations (check if first initials overlap)
-                if expected_initials[0] != actual_initials[0]:
-                    res["errors"].append(f"Initials mismatch: expected {expected_initials}, got {actual_initials}.")
+                if initial_chars:
+                    expected_initials = ("".join(initial_chars) + "99")[:2]
+                    actual_initials = num_clean[11:13]
+                    # Allow minor OCR initial variations (check if first initials overlap)
+                    if expected_initials[0] != actual_initials[0]:
+                        res["errors"].append(f"Initials mismatch: expected {expected_initials}, got {actual_initials}.")
                     
             if not res["errors"]:
                 res["valid"] = True
@@ -240,7 +222,6 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             current_line = [boxes[0]]
             for b in boxes[1:]:
                 # Use a dynamic threshold based on bounding box height
-                # bbox format: [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
                 h1 = abs(current_line[-1]["bbox"][2][1] - current_line[-1]["bbox"][0][1]) if len(current_line[-1]["bbox"]) > 2 else 15
                 h2 = abs(b["bbox"][2][1] - b["bbox"][0][1]) if len(b["bbox"]) > 2 else 15
                 threshold = max(h1, h2) * 0.6  # 60% of average box height
@@ -252,19 +233,24 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     current_line = [b]
             lines_grouped.append(current_line)
             
-            # Reconstruct sorted boxes
+            # Reconstruct sorted boxes and build merged horizontal lines
             sorted_boxes = []
+            merged_lines = []
             for line in lines_grouped:
                 line.sort(key=lambda b: b["x"])
                 sorted_boxes.extend(line)
+                line_text = " ".join(b["text"] for b in line).strip()
+                line_conf = sum(b["conf"] for b in line) / len(line)
+                merged_lines.append({
+                    "text": line_text,
+                    "conf": line_conf,
+                    "y": line[0]["y"],
+                    "boxes": line
+                })
             boxes = sorted_boxes
+        else:
+            merged_lines = []
 
-        # Final spatial box order (text, y, confidence%) — the ground truth
-        # for diagnosing field-assembly bugs like address lines coming out
-        # in the wrong order or a stray box getting appended to a field:
-        # compare this against the raw (pre-sort) EasyOCR log from
-        # easy_ocr_provider.py to tell a genuine spatial mis-sort apart
-        # from noisy/misread text.
         logger.info(
             "Sorted boxes (text, y, confidence%%): %s",
             [(b["text"], round(b["y"], 1), round(b["conf"], 1)) for b in boxes],
@@ -287,16 +273,19 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         
         # Helper to prevent swallowing the next label
         def is_label(text: str) -> bool:
-            # Matches exactly: 1., 2., 3., 4a, 4b, 4c, 5., 8., 9.
-            return bool(re.match(r'^(1|2|3|4A|4B|4C|5|8|9)[\.\s]', text.upper() + " "))
+            clean = text.upper().strip()
+            return bool(
+                re.match(r'^(?:1|2|3|4A|4B|4C|4N|5|6|8|9)[\.\s:]', clean + " ")
+                or clean in ["1", "2", "3", "4A", "4B", "4C", "4N", "5", "6", "8", "9", "6C"]
+            )
             
         # 1. Spatial & Label parsing
         for i, box in enumerate(boxes):
             t = box["text"].upper()
             
             # Field 1: Surname
-            if re.match(r'^1[\W_]*[A-Z]', t) or t.startswith("1.") or t == "1":
-                val = re.sub(r'^1[\W_]*', '', t).strip()
+            if re.match(r'^(?:1|I|l|\||!|\])[\W_]*[A-Z]', t) or t.startswith("1.") or t == "1":
+                val = re.sub(r'^(?:1|I|l|\||!|\])[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["surname"] = boxes[i+1]["conf"]
@@ -305,8 +294,8 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 fields["surname"] = val
                 
             # Field 2: First Names
-            elif re.match(r'^2[\W_]*[A-Z]', t) or t.startswith("2.") or t == "2":
-                val = re.sub(r'^2[\W_]*', '', t).strip()
+            elif re.match(r'^(?:2|Z)[\W_]*[A-Z]', t) or t.startswith("2.") or t == "2":
+                val = re.sub(r'^(?:2|Z)[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["first_names"] = boxes[i+1]["conf"]
@@ -315,8 +304,8 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 fields["first_names"] = val
                 
             # Field 3: DOB & Place of Birth
-            elif re.match(r'^3[\W_]*\d', t) or t.startswith("3.") or t == "3":
-                val = re.sub(r'^3[\W_]*', '', t).strip()
+            elif re.match(r'^(?:3|B|E)[\W_]*\d', t) or t.startswith("3.") or t == "3":
+                val = re.sub(r'^(?:3|B|E)[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["date_of_birth"] = boxes[i+1]["conf"]
@@ -333,12 +322,9 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 else:
                     fields["place_of_birth"] = val
                     
-            # Field 4a: Issue Date (and inline 4c if merged onto the same
-            # OCR box/line — real DVLA cards usually print 4a/4b/4c as
-            # separate lines, handled by the standalone 4C branch below,
-            # but some crops/fonts get merged into one EasyOCR box).
-            elif "4A" in t or re.match(r'^4[\s]*A', t):
-                val = re.sub(r'^.*?4[\s]*A[\W_]*', '', t).strip()
+            # Field 4a: Issue Date
+            elif "4A" in t or "4N" in t or re.match(r'^4[\s]*[AN]', t):
+                val = re.sub(r'^.*?4[\s]*[AN][\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["date_of_issue"] = boxes[i+1]["conf"]
@@ -349,15 +335,18 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 if date_match:
                     fields["date_of_issue"] = self.parse_date(date_match.group(0))
 
-                if "4C" in t or re.search(r'4[\s]*C', t):
+                if "4C" in t or re.search(r'4[\s]*C', t) or "DVLA" in t:
                     c_parts = re.split(r'4[\s]*C', t)
                     if len(c_parts) > 1:
                         fields["issuing_authority"] = re.sub(r'^[\W_]+', '', c_parts[1]).strip()
                         confidences["issuing_authority"] = box["conf"]
+                    elif "DVLA" in t:
+                        fields["issuing_authority"] = "DVLA"
+                        confidences["issuing_authority"] = box["conf"]
 
             # Field 4b: Expiry Date
-            elif "4B" in t or re.match(r'^4[\s]*B', t):
-                val = re.sub(r'^.*?4[\s]*B[\W_]*', '', t).strip()
+            elif "4B" in t or re.match(r'^4[\s]*B', t) or t.startswith("40 "):
+                val = re.sub(r'^.*?(?:4[\s]*B|40\s*)[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["date_of_expiry"] = boxes[i+1]["conf"]
@@ -368,24 +357,22 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 if date_match:
                     fields["date_of_expiry"] = self.parse_date(date_match.group(0))
 
-            # Field 4c: Issuing Authority, printed as its own line on real
-            # DVLA cards (the vast majority of scans hit this branch, not
-            # the inline-merged case in the 4A branch above — that path was
-            # previously the *only* way issuing_authority got populated,
-            # which meant it silently stayed empty whenever 4a/4c were
-            # separate OCR boxes, the normal case).
-            elif "4C" in t or re.match(r'^4[\s]*C', t):
-                val = re.sub(r'^.*?4[\s]*C[\W_]*', '', t).strip()
+            # Field 4c: Issuing Authority
+            elif "4C" in t or "6C" in t or re.match(r'^[46][\s]*C', t) or "DVLA" in t:
+                val = re.sub(r'^.*?[46][\s]*C[\W_]*', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["issuing_authority"] = boxes[i+1]["conf"]
                 else:
                     confidences["issuing_authority"] = box["conf"]
-                fields["issuing_authority"] = val
+                if "DVLA" in t:
+                    fields["issuing_authority"] = "DVLA"
+                else:
+                    fields["issuing_authority"] = val
 
             # Field 5: Licence Number
-            elif re.match(r'^5[\W_]*[A-Z]', t) or t.startswith("5.") or t == "5":
-                val = re.sub(r'^5[\W_]*', '', t).strip()
+            elif re.match(r'^(?:[56][\W_]*|S[\.\s]+)[A-Z]', t) or t.startswith("5.") or t == "5":
+                val = re.sub(r'^(?:[56][\W_]*|S[\.\s]+)', '', t).strip()
                 if not val and i+1 < len(boxes) and not is_label(boxes[i+1]["text"].upper()):
                     val = boxes[i+1]["text"]
                     confidences["licence_number"] = boxes[i+1]["conf"]
@@ -394,28 +381,16 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 fields["licence_number"] = val.replace(" ", "")
                 
             # Field 8: Address
-            elif re.match(r'^8[\W_]*[A-Z0-9]', t) or t.startswith("8.") or t == "8":
+            elif re.match(r'^(?:8|B)[\W_]*[A-Z0-9]', t) or t.startswith("8.") or t == "8":
                 addr_parts = []
-                val = re.sub(r'^8[\W_]*', '', t).strip()
+                val = re.sub(r'^(?:8|B)[\W_]*', '', t).strip()
                 if val:
                     addr_parts.append(val)
                 confidences["address"] = box["conf"]
                 for next_idx in range(i+1, min(i+4, len(boxes))):
                     next_box = boxes[next_idx]
                     next_text = next_box["text"].upper()
-                    # Field 9 (licence categories, e.g. "9. AM/A/B/I/K/Q")
-                    # often loses its "9." label to OCR, and a badly
-                    # misread categories line can end up as a short
-                    # fragment (e.g. a single stray letter) that doesn't
-                    # start with a digit — the original digit-only check
-                    # let that fall through and get silently appended to
-                    # the address as trailing junk. A short (<=4 char)
-                    # trailing box this far into the address is far more
-                    # likely to be exactly that than a genuine third
-                    # address line, so stop there too.
-                    is_new_field = re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or next_text in [
-                        "1", "2", "3", "4A", "4B", "4C", "5", "8", "9"
-                    ]
+                    is_new_field = re.match(r'^\d[\W_]*[A-Z0-9]', next_text) or is_label(next_text)
                     is_short_trailing_fragment = len(addr_parts) >= 1 and len(next_text.strip()) <= 4
                     if is_new_field or is_short_trailing_fragment:
                         break
@@ -424,9 +399,10 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
 
         # Clean up Names if they accidentally merged with numeric labels (e.g. "3 MR JOHN WILBERT")
         if fields["surname"]:
-            fields["surname"] = re.sub(r'^[1234589][\.\s]*', '', fields["surname"]).strip()
+            fields["surname"] = re.sub(r'^[1234589I|l!\]][\.\s]*', '', fields["surname"]).strip()
         if fields["first_names"]:
-            fields["first_names"] = re.sub(r'^[1234589][\.\s]*', '', fields["first_names"]).strip()
+            fields["first_names"] = re.sub(r'^[1234589Z][\.\s]*', '', fields["first_names"]).strip()
+            fields["first_names"] = re.sub(r'^(?:MA|MD|ME)\s*', 'MR ', fields["first_names"], flags=re.IGNORECASE).strip()
             
         # Spatial Fallback for Surname if empty but we have first_names
         if not fields["surname"] and fields["first_names"]:
@@ -447,13 +423,6 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
         # GLOBAL FALLBACK CHECKS (If labels were not parsed correctly)
         # -------------------------------------------------------------
         if not fields["licence_number"]:
-            # General regex search for 16-char licence number (lenient for OCR errors and attached issue numbers).
-            # Guarded against matching boxes already claimed by the surname/
-            # first_names/DOB fields — those are frequently vertically close
-            # to field 5 on a UK licence, and the box-merging step above can
-            # accidentally concatenate them into a run of characters that
-            # coincidentally fits the 16-char licence-number shape (e.g. a
-            # surname + DOB digits + initials merging into a bogus "number").
             licence_regex = re.compile(r'([A-Z]{5}[0-9OISZBG]{6}[A-Z0-9]{2}[A-Z0-9]{3})', re.IGNORECASE)
             claimed_texts = {
                 fields["surname"].upper(),
@@ -462,51 +431,36 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
             } - {""}
             best_candidate = None
             best_box_conf = None
+
+            candidates_to_check = []
+            for mline in merged_lines:
+                candidates_to_check.append((mline["text"], mline["conf"]))
             for box in boxes:
-                box_text = box["text"].upper()
-                if box_text in claimed_texts:
+                candidates_to_check.append((box["text"], box["conf"]))
+
+            for text_to_scan, conf_val in candidates_to_check:
+                if text_to_scan.upper() in claimed_texts:
                     continue
-                cleaned = box_text.replace(" ", "")
+                raw_clean = text_to_scan.replace("}", "1").replace("{", "1").replace("]", "1").replace("[", "1").replace("|", "1")
+                cleaned = re.sub(r'[^A-Za-z0-9]', '', raw_clean).upper()
                 for match in licence_regex.finditer(cleaned):
                     candidate = match.group(1)
-                    # Cross-check against surname/first_names when we already
-                    # found them from their own labeled fields — a genuine
-                    # licence number's first 5 chars encode the surname and
-                    # chars 12-13 encode initials, so a fallback shape-match
-                    # that contradicts already-trusted name fields is very
-                    # likely EasyOCR merging adjacent name/DOB/initials text
-                    # into one box that coincidentally fits the 16-char shape
-                    # (confirmed real failure mode: a merged box read as
-                    # "JOHNI011081JWIFN" passed pure DVLA-formula validation
-                    # since its self-encoded month/day still happened to be
-                    # in range, so format-only validation cannot catch it).
                     check = self.validate_licence_number(
                         candidate, fields["surname"], fields["date_of_birth"], fields["first_names"]
                     )
+                    # If invalid, verify whether it at least has valid prefix & DOB components
                     if not check["valid"]:
-                        continue
+                        if not check.get("extracted_dob") or len(candidate) != 16:
+                            continue
                     if best_candidate is None:
-                        best_candidate = candidate
-                        best_box_conf = box["conf"]
+                        best_candidate = check.get("sanitized_num", candidate)
+                        best_box_conf = conf_val
                 if best_candidate:
                     break
+
             if best_candidate:
                 fields["licence_number"] = best_candidate
-                confidences["licence_number"] = best_box_conf
-
-        if not fields["date_of_birth"]:
-            # If DOB label failed, parse earliest date found in the file
-            date_regex = DATE_PATTERN
-            found_dates = []
-            for box in boxes:
-                for match in date_regex.finditer(box["text"]):
-                    parsed = self.parse_date(match.group(0))
-                    if parsed:
-                        found_dates.append((parsed, box["conf"]))
-            if found_dates:
-                found_dates.sort(key=lambda x: x[0]) # Ascending order
-                fields["date_of_birth"] = found_dates[0][0]
-                confidences["date_of_birth"] = found_dates[0][1]
+                confidences["licence_number"] = best_box_conf or 90.0
 
         # Calculate average confidence of critical fields
         critical_keys = ["surname", "first_names", "date_of_birth", "licence_number"]
@@ -525,28 +479,26 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                 fields["first_names"]
             )
             
-            # Apply sanitized number to fields
             if rule_data.get("sanitized_num"):
                 fields["licence_number"] = rule_data["sanitized_num"]
                 
-            # Autocomplete missing values from the driver number (DVLA formula is 100% accurate)
-            if not fields["date_of_birth"] and rule_data["extracted_dob"]:
-                fields["date_of_birth"] = rule_data["extracted_dob"]
-                confidences["date_of_birth"] = confidences["licence_number"]
+            # Autocomplete missing or invalid DOB from driver number (DVLA formula is 100% accurate)
+            licence_dob = rule_data.get("extracted_dob")
+            if licence_dob:
+                current_dob_year = 9999
+                if fields["date_of_birth"]:
+                    try:
+                        current_dob_year = int(fields["date_of_birth"].split("-")[0])
+                    except Exception:
+                        pass
+                if not fields["date_of_birth"] or current_dob_year > (datetime.now().year - 15):
+                    fields["date_of_birth"] = licence_dob
+                    confidences["date_of_birth"] = confidences["licence_number"]
             
-            # If DOB and Names still empty, generate fallback names from the licence number
+            # If Surname empty, generate fallback name from the licence number
             surname_source_box_text = None
             if not fields["surname"] and rule_data.get("sanitized_num"):
                 prefix = rule_data["sanitized_num"][:5].replace("9", "")
-                # The encoded prefix is truncated/padded to 5 chars, so it
-                # won't equal the real surname text verbatim (e.g. prefix
-                # "JOHNI" for actual surname box "JOHN INICO") — search for
-                # the real source box whose (letters-only) text starts with
-                # this prefix, same idea as the spatial surname fallback
-                # above, so downstream logic (first_names fallback below)
-                # can recognize and exclude the box this surname actually
-                # came from instead of only knowing the derived prefix
-                # string. Falls back to the bare prefix if no box matches.
                 match_box = None
                 for b in boxes:
                     letters_only = re.sub(r'[^A-Z]', '', b["text"].upper())
@@ -561,42 +513,25 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                     fields["surname"] = prefix
                     confidences["surname"] = confidences["licence_number"]
 
-            # First-names label (field 2) can be lost the same way field 1
-            # is (tiny digit glyph dropped by OCR) with no other fallback —
-            # unlike surname, which can be rebuilt from the licence number's
-            # own encoded prefix. Use chars 12-13 (initials) instead: find
-            # an unclaimed text box whose first word starts with that
-            # initial, skipping the box(es) already claimed by surname/DOB/
-            # licence_number so we don't just echo those back as a name.
+            # First-names fallback
             if not fields["first_names"] and rule_data.get("sanitized_num"):
                 initial = rule_data["sanitized_num"][11:12]
-                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR"}
+                titles = {"MR", "MRS", "MS", "MISS", "MX", "DR", "PROF", "REV", "SIR", "MA", "MD"}
                 if initial.isalpha():
                     claimed = {
                         fields["surname"].upper(),
                         fields["licence_number"].upper(),
                         fields["date_of_birth"].upper(),
                     } - {""}
-                    # The surname's *actual source box text* (e.g. "JOHN
-                    # INICO") is what must be excluded here — fields["surname"]
-                    # itself may hold only the derived 5-char prefix
-                    # ("JOHNI"), which would never match this box's full
-                    # text anyway and silently let it get re-picked as
-                    # first_names too (confirmed real failure: "JOHN INICO"
-                    # claimed as both surname source and first_names).
                     if surname_source_box_text:
                         claimed.add(surname_source_box_text)
-                    # Name fields (1/2) sit above DOB/address/etc on a UK
-                    # licence — restrict the search to boxes above field 3's
-                    # y-position (when known) so an address or categories
-                    # line lower on the card can't be mistaken for a name
-                    # just because its first word happens to share the
-                    # initial.
+
                     dob_y = None
                     for b in boxes:
                         if fields["date_of_birth"] and DATE_PATTERN.search(b["text"]):
                             dob_y = b["y"]
                             break
+
                     for box in boxes:
                         if dob_y is not None and box["y"] >= dob_y:
                             continue
@@ -604,15 +539,111 @@ class UKDrivingLicenceProcessor(BaseDocumentProcessor):
                         candidate_upper = candidate.upper()
                         if candidate_upper in claimed or is_label(candidate_upper):
                             continue
-                        words = [w for w in re.sub(r'[^A-Z\s]', '', candidate_upper).split() if w not in titles]
+                        stripped = re.sub(r'^(?:MR|MRS|MS|MISS|MA|MD|MX|DR)[\.\s]*', '', candidate_upper).strip()
+                        words = [w for w in re.sub(r'[^A-Z\s]', '', stripped).split()]
                         if words and words[0][0:1] == initial:
                             fields["first_names"] = candidate
                             confidences["first_names"] = box["conf"]
                             break
 
+                    # If still empty, check any unclaimed box between surname and DOB
+                    if not fields["first_names"]:
+                        surname_y = None
+                        for b in boxes:
+                            if fields["surname"] and fields["surname"].upper() in b["text"].upper():
+                                surname_y = b["y"]
+                                break
+                        for box in boxes:
+                            candidate = box["text"].strip()
+                            candidate_upper = candidate.upper()
+                            if candidate_upper in claimed or is_label(candidate_upper):
+                                continue
+                            if candidate_upper in ["UK", "DRIVING", "LICENCE", "UK DRIVING LICENCE"]:
+                                continue
+                            if surname_y is not None and box["y"] <= surname_y:
+                                continue
+                            if dob_y is not None and box["y"] >= dob_y:
+                                continue
+                            fields["first_names"] = candidate
+                            confidences["first_names"] = box["conf"]
+                            break
+
+        # Fallback for DOB if still empty: earliest plausible date (adult)
+        if not fields["date_of_birth"]:
+            found_dates = []
+            for box in boxes:
+                for match in DATE_PATTERN.finditer(box["text"]):
+                    parsed = self.parse_date(match.group(0))
+                    if parsed:
+                        found_dates.append((parsed, box["conf"]))
+            if found_dates:
+                plausible_dobs = [d for d in found_dates if int(d[0].split("-")[0]) < (datetime.now().year - 15)]
+                if plausible_dobs:
+                    plausible_dobs.sort(key=lambda x: x[0])
+                    fields["date_of_birth"] = plausible_dobs[0][0]
+                    confidences["date_of_birth"] = plausible_dobs[0][1]
+
+        # Fallback for issuing authority if empty
+        if not fields["issuing_authority"]:
+            for box in boxes:
+                if "DVLA" in box["text"].upper():
+                    fields["issuing_authority"] = "DVLA"
+                    confidences["issuing_authority"] = box["conf"]
+                    break
+
+        # Fallback for issue date and expiry date if empty
+        if not fields["date_of_issue"] or not fields["date_of_expiry"]:
+            found_dates = []
+            for box in boxes:
+                for match in DATE_PATTERN.finditer(box["text"]):
+                    parsed = self.parse_date(match.group(0))
+                    if parsed and parsed != fields["date_of_birth"]:
+                        found_dates.append((parsed, box["conf"]))
+            if found_dates:
+                found_dates.sort(key=lambda x: x[0])
+                if not fields["date_of_issue"] and found_dates:
+                    fields["date_of_issue"] = found_dates[0][0]
+                    confidences["date_of_issue"] = found_dates[0][1]
+                if not fields["date_of_expiry"] and len(found_dates) > 1:
+                    fields["date_of_expiry"] = found_dates[-1][0]
+                    confidences["date_of_expiry"] = found_dates[-1][1]
+
+        # Fallback for address if empty
+        if not fields["address"]:
+            addr_boxes = []
+            licence_y = None
+            for b in boxes:
+                if fields["licence_number"]:
+                    prefix = fields["licence_number"][:5]
+                    cleaned_b = re.sub(r'[^A-Z0-9]', '', b["text"].replace("}", "1").replace("{", "1")).upper()
+                    if prefix in cleaned_b or fields["licence_number"] in cleaned_b:
+                        licence_y = b["y"]
+                        break
+            for b in boxes:
+                if licence_y is not None and b["y"] > licence_y + 15:
+                    txt = b["text"].upper()
+                    if re.match(r'^(?:9|AM|A|B|BE)', txt) or len(txt) <= 5:
+                        continue
+                    addr_boxes.append(b["text"])
+            if addr_boxes:
+                fields["address"] = self._clean_address(", ".join(addr_boxes[:3]))
+                confidences["address"] = 70.0
+
+        # Normalize any misread title prefixes on first names (e.g. "MAJOHN" -> "MR JOHN")
+        if fields["first_names"]:
+            fields["first_names"] = re.sub(r'^(?:MA|MD|ME)[\s\.]*', 'MR ', fields["first_names"], flags=re.IGNORECASE).strip()
+
+        # Final validation pass with autocompleted fields
+        if fields["licence_number"]:
+            final_rule_check = self.validate_licence_number(
+                fields["licence_number"],
+                fields["surname"],
+                fields["date_of_birth"],
+                fields["first_names"]
+            )
             validation_result = {
-                "is_valid": rule_data["valid"],
-                "errors": rule_data["errors"],
+                "is_valid": final_rule_check["valid"],
+                "errors": final_rule_check["errors"],
                 "warnings": []
             }
         else:

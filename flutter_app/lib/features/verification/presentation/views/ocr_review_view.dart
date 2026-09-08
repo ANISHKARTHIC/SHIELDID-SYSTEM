@@ -107,7 +107,7 @@ class _OCRReviewViewState extends State<OCRReviewView> {
         return;
       }
 
-      final extracted = result['extracted_data'];
+      final extracted = (result['extracted_data'] as Map<String, dynamic>?) ?? {};
       // uk_driving_licence responses carry surname/first_names already
       // correctly separated server-side (UKDrivingLicenceProcessor spatially
       // parses fields 1/2 independently) — use those directly rather than
@@ -125,31 +125,40 @@ class _OCRReviewViewState extends State<OCRReviewView> {
       // encoded data is internally consistent. The legitimacy banner
       // needs the former.
       final licenceValidation =
-          extracted['validation'] as Map<String, dynamic>?;
+          (extracted['validation'] ?? result['validation']) as Map<String, dynamic>?;
       final validationErrors =
           (licenceValidation?['errors'] as List?)?.cast<String>() ?? [];
 
       if (mounted) {
         setState(() {
-          if (fields != null) {
-            _surnameController.text = _cleanField(fields['surname']);
-            _firstNameController.text = _cleanField(fields['first_names']);
+          final rawSurname = fields?['surname'];
+          final rawFirstNames = fields?['first_names'];
+          if (rawSurname != null &&
+              rawSurname.toString().trim().isNotEmpty &&
+              rawSurname.toString().trim() != _notLegiblePlaceholder) {
+            _surnameController.text = _cleanField(rawSurname);
+            _firstNameController.text = _cleanField(rawFirstNames);
           } else {
             // Passport / other document types: fall back to the flattened
             // name, which is all the backend returns for those.
-            final fullName = extracted['name'] ?? '';
-            final parts = fullName.split(' ');
-            _surnameController.text = parts.length > 1 ? parts.last : fullName;
-            _firstNameController.text = parts.length > 1
-                ? parts.sublist(0, parts.length - 1).join(' ')
-                : '';
+            final fullName = (extracted['name'] ?? '').toString().trim();
+            if (fullName.isNotEmpty && fullName != _notLegiblePlaceholder) {
+              final parts = fullName.split(RegExp(r'\s+'));
+              _surnameController.text = parts.length > 1 ? parts.last : fullName;
+              _firstNameController.text = parts.length > 1
+                  ? parts.sublist(0, parts.length - 1).join(' ')
+                  : '';
+            } else {
+              _surnameController.text = '';
+              _firstNameController.text = '';
+            }
           }
-          _dobController.text = extracted['dob'] ?? '';
-          _licenceController.text = extracted['document_number'] ?? '';
-          _addressController.text = _cleanField(extracted['address']);
-          _issueDateController.text = _cleanField(extracted['issue_date']);
-          _expiryDateController.text = _cleanField(extracted['expiry_date']);
-          _documentType = extracted['document_type'] ?? 'unknown';
+          _dobController.text = _cleanField(fields?['date_of_birth'] ?? extracted['dob']);
+          _licenceController.text = _cleanField(fields?['licence_number'] ?? extracted['document_number']);
+          _addressController.text = _cleanField(fields?['address'] ?? extracted['address']);
+          _issueDateController.text = _cleanField(fields?['date_of_issue'] ?? extracted['issue_date']);
+          _expiryDateController.text = _cleanField(fields?['date_of_expiry'] ?? extracted['expiry_date']);
+          _documentType = (extracted['document_type'] ?? result['document_type'] ?? 'unknown').toString();
 
           final licenceConf = confidences?['licence_number'];
           _licenceConfidence = licenceConf is num

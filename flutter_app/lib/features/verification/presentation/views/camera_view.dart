@@ -66,6 +66,9 @@ class _CameraViewState extends State<CameraView> {
 
     try {
       await _controller!.initialize();
+      try {
+        await _controller!.setFocusMode(FocusMode.auto);
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _isCameraInitialized = true;
@@ -109,7 +112,7 @@ class _CameraViewState extends State<CameraView> {
   Future<void> _takePicture() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
     if (_isCapturing) return;
-    _isCapturing = true;
+    setState(() => _isCapturing = true);
 
     try {
       // takePicture() can't run while the image stream (used for
@@ -118,29 +121,47 @@ class _CameraViewState extends State<CameraView> {
       // detector itself or a manual shutter tap.
       await _stabilityDetector?.stop();
       final image = await _controller!.takePicture();
-      _navigateToReview(image.path);
+      await _navigateToReview(image.path);
     } catch (e) {
-      _isCapturing = false;
-      _stabilityDetector?.reset();
-      _stabilityDetector?.start();
       if (mounted) {
         setState(() => _error = 'Could not capture photo. Please try again.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCapturing = false);
+        _stabilityDetector?.reset();
+        _stabilityDetector?.start();
       }
     }
   }
 
   Future<void> _pickImage() async {
+    if (_isCapturing) return;
     final picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
     if (image != null) {
-      _navigateToReview(image.path);
+      setState(() => _isCapturing = true);
+      try {
+        await _stabilityDetector?.stop();
+        await _navigateToReview(image.path);
+      } catch (e) {
+        if (mounted) {
+          setState(() => _error = 'Could not load selected photo.');
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isCapturing = false);
+          _stabilityDetector?.reset();
+          _stabilityDetector?.start();
+        }
+      }
     }
   }
 
-  void _navigateToReview(String path) {
+  Future<void> _navigateToReview(String path) async {
     if (mounted) {
-      Navigator.of(context).push(
+      await Navigator.of(context).push(
         AppPageRoute.push(
           OCRReviewView(imagePath: path, sessionId: widget.sessionId),
         ),

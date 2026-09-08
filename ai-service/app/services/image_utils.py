@@ -36,3 +36,33 @@ def resize_image_for_ai(image_bytes: bytes, max_dim: int = 1024) -> bytes:
         return encoded.tobytes()
     except Exception:
         return image_bytes
+
+
+def enhance_image_for_ocr(img: np.ndarray) -> np.ndarray:
+    """
+    Enhance document image for OCR by:
+    1. Upscaling if the document resolution is too low (< 600px on min dimension)
+    2. Applying subtle unsharp masking to sharpen character boundaries
+    3. Applying CLAHE on luminance channel to equalize lighting and boost text contrast
+    """
+    if img is None or img.size == 0:
+        return img
+
+    try:
+        h, w = img.shape[:2]
+        min_dim = min(h, w)
+        if min_dim < 600:
+            scale = max(1.5, 800.0 / float(max(min_dim, 1)))
+            img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+
+        gaussian = cv2.GaussianBlur(img, (0, 0), 1.5)
+        sharpened = cv2.addWeighted(img, 1.3, gaussian, -0.3, 0)
+
+        lab = cv2.cvtColor(sharpened, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        enhanced = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2RGB)
+        return enhanced
+    except Exception:
+        return img

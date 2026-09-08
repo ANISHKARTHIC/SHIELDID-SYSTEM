@@ -118,9 +118,17 @@ class EasyOCRProvider(BaseOCR):
         except Exception as e:
             raise ValueError(f"Failed to decode image bytes in OCR: {e}")
 
+        from app.services.image_utils import enhance_image_for_ocr
+        enhanced_img = enhance_image_for_ocr(img)
+
         # 2. Run EasyOCR
         try:
-            results = reader.readtext(img)
+            results = reader.readtext(enhanced_img)
+            # If enhanced image yielded very few lines, fall back to raw image
+            if len(results) < 3:
+                raw_results = reader.readtext(img)
+                if len(raw_results) > len(results):
+                    results = raw_results
         except Exception as e:
             raise RuntimeError(f"OCR engine runtime error: {e}")
 
