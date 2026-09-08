@@ -247,7 +247,7 @@ async def face_match_endpoint(file: UploadFile = File(...), reference_embedding:
 
     contents = await file.read()
     from app.services.image_utils import resize_image_for_ai
-    contents = resize_image_for_ai(contents)
+    contents = resize_image_for_ai(contents, crop_document=False)
     face_provider = model_registry.get_provider('face')
     if face_provider is None or face_provider.app is None:
         raise HTTPException(status_code=503, detail="Face recognition model is not loaded")

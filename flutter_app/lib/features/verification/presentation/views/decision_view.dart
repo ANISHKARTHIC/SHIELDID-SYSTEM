@@ -468,40 +468,79 @@ class _DecisionViewState extends State<DecisionView>
     final enabled = _actionsEnabled && !_isSubmitting;
 
     if (widget.decision == 'BLOCKED') {
-      return SizedBox(
-        width: double.infinity,
-        height: 58,
-        child: OutlinedButton(
-          onPressed: enabled
-              ? () => _confirmAndSubmit('BLOCK', isDestructiveOverride: true)
-              : null,
-          style: OutlinedButton.styleFrom(
-            side: BorderSide(
-              color: Colors.white.withValues(alpha: 0.45),
-              width: 1.4,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+      return Column(
+        children: [
+          // Primary action: confirm the block as-is. This is the safe,
+          // expected outcome for a restricted visitor, so it submits
+          // straight away with no extra confirmation dialog — staff were
+          // previously stuck here because the only button on this screen
+          // triggered an "Override & Allow" dialog while claiming to
+          // "Dismiss Restricted Entry", so nothing here actually recorded
+          // a block and returned to the next scan.
+          SizedBox(
+            width: double.infinity,
+            height: 58,
+            child: ElevatedButton(
+              onPressed: enabled ? () => _confirmAndSubmit('BLOCK') : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: outcome.bottom,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: _isSubmitting
+                  ? SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        color: outcome.bottom,
+                        strokeWidth: 2.4,
+                      ),
+                    )
+                  : const Text(
+                      'Confirm Block',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
             ),
           ),
-          child: _isSubmitting
-              ? const SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 2.4,
-                  ),
-                )
-              : const Text(
-                  'Dismiss Restricted Entry',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
+          const SizedBox(height: 12),
+          // Secondary, destructive-confirmed action: actually let the
+          // restricted visitor in, e.g. for a false-positive match. This
+          // is the only path on this screen that should show the
+          // "Override restriction?" dialog, since it's the only one that
+          // matches what that dialog says will happen.
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton(
+              onPressed: enabled
+                  ? () =>
+                        _confirmAndSubmit('PASS', isDestructiveOverride: true)
+                  : null,
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.45),
+                  width: 1.4,
                 ),
-        ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: const Text(
+                'Override & Allow Entry',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+        ],
       );
     }
 

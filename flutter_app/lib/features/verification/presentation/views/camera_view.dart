@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'ocr_review_view.dart';
 import '../../../../core/widgets/camera_scaffold.dart';
 import '../../../../core/widgets/document_stability_detector.dart';
+import '../../../../core/widgets/guide_frame_cropper.dart';
 import '../../../../core/navigation/app_page_route.dart';
 import '../../../../core/security/camera_permission_service.dart';
 
@@ -154,7 +155,8 @@ class _CameraViewState extends State<CameraView> {
       }
 
       final image = await _controller!.takePicture();
-      await _navigateToReview(image.path);
+      final croppedPath = await _cropToGuideFrame(image.path);
+      await _navigateToReview(croppedPath);
     } catch (e) {
       if (mounted) {
         setState(() => _error = 'Could not capture photo. Please try again.');
@@ -202,6 +204,23 @@ class _CameraViewState extends State<CameraView> {
     }
   }
 
+  static const _guideWidthFactor = 0.85;
+  static const _guideHeightFactor = 0.55;
+
+  Future<String> _cropToGuideFrame(String path) async {
+    if (_controller == null || !mounted) return path;
+    final size = MediaQuery.of(context).size;
+    return GuideFrameCropper.cropToGuide(
+      imagePath: path,
+      controller: _controller!,
+      screenWidth: size.width,
+      screenHeight: size.height,
+      guideWidthFactor: _guideWidthFactor,
+      guideHeightFactor: _guideHeightFactor,
+      isOvalGuide: false,
+    );
+  }
+
   Future<void> _navigateToReview(String path) async {
     if (mounted) {
       await Navigator.of(context).push(
@@ -225,6 +244,8 @@ class _CameraViewState extends State<CameraView> {
       currentStep: 1,
       totalSteps: 3,
       stepLabel: 'Scan Document',
+      guideWidthFactor: _guideWidthFactor,
+      guideHeightFactor: _guideHeightFactor,
       onCapture: _takePicture,
       onPickFromGallery: _pickImage,
       onClose: () => Navigator.pop(context),

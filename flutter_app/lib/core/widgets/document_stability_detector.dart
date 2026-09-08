@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
 
@@ -42,6 +43,14 @@ class DocumentStabilityDetector {
   double? get lastSharpness => _lastSharpness;
   double? _lastSharpness;
 
+  /// Minimum luminance standard deviation (0-255 scale) within the central
+  /// guide region for a frame to be considered "has document-like content."
+  /// A blank wall, table, or out-of-focus void produces a low value here;
+  /// a card with text/photo/borders produces a much higher one. Without
+  /// this, stillness alone (e.g. pointing at a blank surface) satisfies
+  /// the MAD stability check and fires a capture with no document in frame.
+  final double minContentVariance;
+
   DocumentStabilityDetector({
     required this.controller,
     required this.onStable,
@@ -49,6 +58,7 @@ class DocumentStabilityDetector {
     this.stabilityThreshold = 4.5,
     this.requiredStableFrames = 28,
     this.initialSettlingFrames = 24,
+    this.minContentVariance = 18.0,
   });
 
   void start() {
@@ -108,11 +118,20 @@ class DocumentStabilityDetector {
     }
 
     final mad = _computeMAD(currentGrid, prevGrid);
+    final hasContent = _centralRegionVariance(
+          yPlane.bytes,
+          image.width,
+          image.height,
+          yPlane.bytesPerRow,
+        ) >=
+        minContentVariance;
 
-    if (mad < stabilityThreshold) {
+    if (mad < stabilityThreshold && hasContent) {
       _stableStreak++;
     } else {
-      // If motion detected, quickly decay rather than instant zero to avoid jitter
+      // If motion detected, or the guide area is just blank wall/table
+      // with nothing document-like in it, quickly decay rather than
+      // instant zero to avoid jitter.
       _stableStreak = (_stableStreak > 3) ? _stableStreak - 3 : 0;
     }
 
@@ -123,6 +142,43 @@ class DocumentStabilityDetector {
       _hasFired = true;
       onStable();
     }
+  }
+
+  /// Standard deviation of luma within the central ~55% x ~55% of the
+  /// frame — a coarse proxy for "does the guide-box area contain a
+  /// document" (text/photo/border edges) vs. a blank wall or tabletop
+  /// (near-uniform luma, low variance).
+  double _centralRegionVariance(
+    Uint8List yPlane,
+    int width,
+    int height,
+    int bytesPerRow,
+  ) {
+    const stride = 8;
+    final left = (width * 0.225).round();
+    final right = (width * 0.775).round();
+    final top = (height * 0.225).round();
+    final bottom = (height * 0.775).round();
+
+    double sum = 0;
+    double sumSq = 0;
+    int count = 0;
+    for (int y = top; y < bottom; y += stride) {
+      final rowStart = y * bytesPerRow;
+      if (rowStart >= yPlane.length) break;
+      for (int x = left; x < right; x += stride) {
+        final pos = rowStart + x;
+        if (pos >= yPlane.length) break;
+        final v = yPlane[pos].toDouble();
+        sum += v;
+        sumSq += v * v;
+        count++;
+      }
+    }
+    if (count == 0) return 0;
+    final mean = sum / count;
+    final variance = (sumSq / count) - (mean * mean);
+    return variance <= 0 ? 0 : math.sqrt(variance);
   }
 
   /// Samples a downsampled 1D array of luma points (stride = 16)

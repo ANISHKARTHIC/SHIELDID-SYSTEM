@@ -136,15 +136,22 @@ def crop_and_deskew_document(img: np.ndarray) -> np.ndarray:
     return img
 
 
-def resize_image_for_ai(image_bytes: bytes, max_dim: int = 1024) -> bytes:
+def resize_image_for_ai(image_bytes: bytes, max_dim: int = 1024, crop_document: bool = True) -> bytes:
     """
-    Crops the document from any surrounding background, then downscales to
-    max_dim on the longest side.
+    Optionally crops a document from any surrounding background, then
+    downscales to max_dim on the longest side.
 
     Cropping before downscaling preserves crucial high-frequency details:
     a card inside a 12MP photo previously shrank to ~350px when the whole
     photo was downscaled, making fine text unreadable. Now the card itself
     is isolated first and occupies up to max_dim pixels.
+
+    [crop_document] must be False for a live face-capture selfie: it isn't
+    a rectangular document, so `crop_and_deskew_document`'s card-shaped
+    contour search has nothing valid to find. Best case it's a no-op;
+    worst case it latches onto some other rectangular thing in the
+    background (a doorway, phone, picture frame) and crops the face
+    partly or fully out of frame before InsightFace ever sees it.
     """
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
@@ -154,8 +161,8 @@ def resize_image_for_ai(image_bytes: bytes, max_dim: int = 1024) -> bytes:
         if img is None:
             return image_bytes
 
-        # First crop document from scene if present
-        img = crop_and_deskew_document(img)
+        if crop_document:
+            img = crop_and_deskew_document(img)
 
         h, w = img.shape[:2]
         if max(h, w) <= max_dim:
