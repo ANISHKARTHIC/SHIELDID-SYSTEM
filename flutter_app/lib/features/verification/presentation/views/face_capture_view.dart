@@ -189,9 +189,19 @@ class _FaceCaptureViewState extends State<FaceCaptureView> {
               (e.type == DioExceptionType.receiveTimeout ||
                   e.type == DioExceptionType.sendTimeout ||
                   e.type == DioExceptionType.connectionTimeout);
+          // A 422 here means the ai-service rejected the photo itself (no
+          // face found, or a detected face too low-confidence/small to
+          // trust) — its `detail` message tells the operator specifically
+          // what to fix (retake selfie vs. reposition ID), which a flat
+          // "Could not verify identity" previously discarded entirely.
+          final serverDetail = e is DioException &&
+                  e.response?.statusCode == 422 &&
+                  e.response?.data is Map
+              ? (e.response!.data as Map)['detail']?.toString()
+              : null;
           _error = isTimeout
               ? 'The verification service is taking longer than usual. Please try again.'
-              : 'Could not verify identity. Please try again.';
+              : (serverDetail ?? 'Could not verify identity. Please try again.');
           _isProcessing = false;
         });
       }

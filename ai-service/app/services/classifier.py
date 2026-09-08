@@ -17,9 +17,22 @@ def detect_face(image_bytes: bytes):
         if face_provider and face_provider.app:
             faces = face_provider.app.get(img)
             if len(faces) > 0:
+                # Document validity only needs *a* face photo present — a
+                # slightly glary/angled card photo shouldn't block the scan.
+                # The embedding used for face-match comparison is a
+                # different, stricter bar: a low-confidence or too-small
+                # detection (glare/moiré from re-photographing a screen,
+                # or a background face when the document crop missed)
+                # produces a garbage embedding that silently fails to
+                # cosine-match the same real person later. Leaving
+                # face_embedding as None here lets that flow through as
+                # "no reference face" (CHECK) downstream, instead of a
+                # confusing false "face mismatch".
+                from app.services.providers.insightface_provider import select_best_face
                 embedding = None
-                if hasattr(faces[0], "embedding") and faces[0].embedding is not None:
-                    embedding = faces[0].embedding.tolist()
+                best = select_best_face(faces, img.shape)
+                if best is not None and getattr(best, "embedding", None) is not None:
+                    embedding = best.embedding.tolist()
                 return True, embedding
             return False, None
 

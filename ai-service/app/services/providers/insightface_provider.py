@@ -23,6 +23,57 @@ MODEL_CACHE_ROOT = os.getenv("INSIGHTFACE_MODEL_ROOT", os.path.expanduser("~/.in
 INSIGHTFACE_MODEL_PACK = os.getenv("INSIGHTFACE_MODEL_PACK", "buffalo_l")
 INSIGHTFACE_DET_SIZE = int(os.getenv("INSIGHTFACE_DET_SIZE", "640"))
 
+# Below this RetinaFace detection confidence, a "face" is more likely a
+# false-positive (a face-shaped blob in glare/moiré/background clutter)
+# than a real one — embedding it anyway silently produces a garbage
+# 512D vector that won't cosine-match the same real person, surfacing
+# downstream only as an unexplained "face mismatch" / CHECK decision.
+MIN_FACE_DET_SCORE = float(os.getenv("INSIGHTFACE_MIN_DET_SCORE", "0.55"))
+
+# Below this fraction of the image's shorter side, a detected face is too
+# small to yield a reliable ArcFace embedding (common when the crop step
+# upstream failed and the real face occupies a small corner of a much
+# larger scene) — reject rather than embed a low-fidelity crop.
+MIN_FACE_SIZE_RATIO = float(os.getenv("INSIGHTFACE_MIN_FACE_SIZE_RATIO", "0.08"))
+
+
+def select_best_face(faces, img_shape):
+    """
+    Picks the highest-quality detected face — by detection confidence,
+    tie-broken by bbox area — instead of blindly trusting `faces[0]`
+    (RetinaFace's own default ordering, which is a reasonable but not
+    guaranteed proxy for "the real subject's face"). Returns None if no
+    face clears the confidence/size bar, so callers can fail with a clear
+    "retake" message instead of comparing against a garbage embedding.
+    """
+    if not faces:
+        return None
+
+    h, w = img_shape[:2]
+    min_dim = min(h, w)
+
+    def bbox_area(face):
+        x1, y1, x2, y2 = face.bbox
+        return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+    candidates = []
+    for face in faces:
+        det_score = float(getattr(face, "det_score", 0.0) or 0.0)
+        if det_score < MIN_FACE_DET_SCORE:
+            continue
+        x1, y1, x2, y2 = face.bbox
+        face_size = min(x2 - x1, y2 - y1)
+        if min_dim <= 0 or face_size < MIN_FACE_SIZE_RATIO * min_dim:
+            continue
+        candidates.append(face)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda f: (float(f.det_score), bbox_area(f)), reverse=True)
+    return candidates[0]
+
+
 class InsightFaceProvider(BaseFaceRecognition):
     def __init__(self):
         self.app = None
@@ -61,9 +112,15 @@ class InsightFaceProvider(BaseFaceRecognition):
         faces = self.app.get(img)
         if len(faces) == 0:
             raise ValueError("No face detected in the image.")
-            
-        # Return the embedding of the most prominent face
-        return faces[0].embedding
+
+        best = select_best_face(faces, img.shape)
+        if best is None:
+            raise ValueError(
+                "Face was not clear enough to verify. Please retake the photo "
+                "with better lighting and the face closer to the camera."
+            )
+
+        return best.embedding
         
     def compare(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """

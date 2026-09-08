@@ -7,6 +7,7 @@ from backend.api.deps import get_db, get_current_active_user, RoleChecker
 from backend.core.security import get_password_hash
 from backend.models.models import User, RoleEnum, AuditLog
 from backend.services.venue_admin_service import venue_admin_service
+from backend.core.datetime_utils import to_utc_iso
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"], dependencies=[Depends(get_current_active_user)])
 
@@ -40,7 +41,7 @@ def _user_summary(user: User) -> dict:
         "role": user.role.value if hasattr(user.role, "value") else str(user.role),
         "venue_id": user.venue_id,
         "is_active": user.is_active,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": to_utc_iso(user.created_at),
     }
 
 

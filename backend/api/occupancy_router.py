@@ -7,6 +7,7 @@ from backend.models.models import RoleEnum, User
 from backend.services.occupancy_service import occupancy_service
 from backend.services.venue_admin_service import venue_admin_service
 from backend.services.venue_service import venue_service
+from backend.core.datetime_utils import to_utc_iso
 
 router = APIRouter(prefix="/api/v1/occupancy", tags=["occupancy"], dependencies=[Depends(get_current_active_user)])
 require_floor_staff = RoleChecker([RoleEnum.door_staff, RoleEnum.manager, RoleEnum.venue_admin, RoleEnum.super_admin])
@@ -19,12 +20,12 @@ def _occupant_summary(record, auto_expire_hours: int) -> dict:
     if record.entered_at:
         entered = record.entered_at if record.entered_at.tzinfo else record.entered_at.replace(tzinfo=timezone.utc)
         minutes_inside = int((datetime.now(timezone.utc) - entered).total_seconds() // 60)
-        auto_expire_at = (entered + timedelta(hours=auto_expire_hours)).isoformat()
+        auto_expire_at = to_utc_iso(entered + timedelta(hours=auto_expire_hours))
     return {
         "occupancy_id": record.id,
         "customer_id": record.customer_id,
         "customer_name": customer.name if customer else "Unknown",
-        "entered_at": record.entered_at.isoformat() if record.entered_at else None,
+        "entered_at": to_utc_iso(record.entered_at),
         "minutes_inside": minutes_inside,
         "auto_expire_at": auto_expire_at,
     }
@@ -70,4 +71,4 @@ def manual_checkout(
         raise HTTPException(status_code=400, detail=str(e))
     if not record:
         raise HTTPException(status_code=404, detail="Occupancy record not found")
-    return {"success": True, "occupancy_id": record.id, "exited_at": record.exited_at.isoformat()}
+    return {"success": True, "occupancy_id": record.id, "exited_at": to_utc_iso(record.exited_at)}

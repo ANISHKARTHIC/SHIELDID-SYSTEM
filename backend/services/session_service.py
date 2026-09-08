@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from backend.models.models import VerificationSession, SessionAuditLog, SessionStateEnum
 from backend.core.event_bus import event_bus, CH_VERIFICATIONS
+from backend.core.datetime_utils import to_utc_iso
 from backend.services.storage_service import storage_service
 from datetime import datetime, timezone
 import uuid
@@ -83,7 +84,7 @@ class SessionService:
                 "operator_id": session.operator_id,
                 "state_from": old_state,
                 "state_to": new_state.value,
-                "timestamp": session.updated_at.isoformat()
+                "timestamp": to_utc_iso(session.updated_at)
             }
         )
         

@@ -8,6 +8,7 @@ import csv
 
 from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import VerificationSession, User, RoleEnum
+from backend.core.datetime_utils import to_utc_iso
 
 router = APIRouter(prefix="/api/v1/export", tags=["export"], dependencies=[Depends(get_current_active_user)])
 
@@ -43,7 +44,7 @@ async def export_fraud_csv(
     
     for s in sessions:
         writer.writerow([
-            s.id, s.venue_id, s.operator_id, s.created_at.isoformat(), s.risk_score, s.final_decision
+            s.id, s.venue_id, s.operator_id, to_utc_iso(s.created_at), s.risk_score, s.final_decision
         ])
         
     output.seek(0)

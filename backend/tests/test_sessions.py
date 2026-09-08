@@ -147,6 +147,40 @@ class TestSessionEndpoints(unittest.TestCase):
         self.assertIn("pending", data)
         self.assertIn("flagged", data)
 
+    def test_operator_stats_excludes_abandoned_early_sessions_from_pending(self):
+        # Regression: a session the operator started and immediately backed
+        # out of (never got past document scan/OCR, never reached the
+        # decision screen) previously counted as "pending" forever, since
+        # nothing ever finalizes or expires it — inflating the dashboard
+        # count with scans that were never really awaiting review.
+        start_res = client.post("/api/v1/session/start", headers=self.headers)
+        abandoned_session_id = start_res.json()["session_id"]
+        with TestingSessionLocal() as db:
+            sess = db.query(VerificationSession).filter(
+                VerificationSession.id == abandoned_session_id
+            ).first()
+            sess.state = SessionStateEnum.DOCUMENT_CLASSIFIED
+            db.commit()
+
+        response = client.get("/api/v1/operator/stats", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pending"], 0)
+
+        # A session that did reach the decision screen (face verified) but
+        # hasn't been finalized yet should still count as pending.
+        start_res2 = client.post("/api/v1/session/start", headers=self.headers)
+        awaiting_session_id = start_res2.json()["session_id"]
+        with TestingSessionLocal() as db:
+            sess = db.query(VerificationSession).filter(
+                VerificationSession.id == awaiting_session_id
+            ).first()
+            sess.state = SessionStateEnum.FACE_VERIFIED
+            db.commit()
+
+        response = client.get("/api/v1/operator/stats", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["pending"], 1)
+
     def test_finalize_session_pass(self):
         # 1. Start session
         start_res = client.post("/api/v1/session/start", headers=self.headers)

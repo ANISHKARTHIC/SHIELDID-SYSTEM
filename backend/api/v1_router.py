@@ -15,6 +15,7 @@ from backend.services.storage_service import storage_service
 from backend.services.venue_service import venue_service
 from backend.core.config import settings
 from backend.core.logger import get_logger
+from backend.core.datetime_utils import to_utc_iso
 
 logger = get_logger("ocr_extraction")
 
@@ -37,7 +38,7 @@ async def start_session(
     """Initialize a new verification session for the authenticated operator's venue"""
     session = session_service.create_session(db, venue_id=current_user.venue_id, operator_id=current_user.id)
     session_id = session.id
-    redis_client.setex(f"session:{session_id}", 3600, json.dumps({"step": 1, "status": "started", "session_id": session_id}))
+    redis_client.set(f"session:{session_id}", json.dumps({"step": 1, "status": "started", "session_id": session_id}), ex=3600)
     return {"session_id": session_id}
 
 @router.get("/operator/stats")
@@ -51,7 +52,28 @@ async def get_operator_stats(
 
     verified = sum(1 for s in sessions if str(s.final_decision or "").lower() == "pass" and s.created_at and s.created_at.date() == today)
     flagged = sum(1 for s in sessions if str(s.final_decision or "").lower() in ["deny", "blocked", "restricted"] and s.created_at and s.created_at.date() == today)
-    pending = sum(1 for s in sessions if s.final_decision is None and s.created_at and s.created_at.date() == today)
+    # "Pending" means a decision was actually computed (the operator
+    # reached the review screen) and is awaiting their confirm tap —
+    # not merely "a session row exists with no final_decision yet". A
+    # session that never got past document scan/OCR (closed early,
+    # backgrounded, or simply the last few seconds of an in-progress
+    # scan) previously counted here forever, since nothing ever expires
+    # or finalizes it — inflating this number with abandoned scans that
+    # were never really awaiting review.
+    _reached_decision_states = {
+        SessionStateEnum.FACE_VERIFIED,
+        SessionStateEnum.DATABASE_CHECKED,
+        SessionStateEnum.RISK_EVALUATED,
+        SessionStateEnum.MANUAL_REVIEW,
+        SessionStateEnum.FRAUD_REVIEW,
+        SessionStateEnum.DENIED,
+    }
+    pending = sum(
+        1 for s in sessions
+        if s.final_decision is None
+        and s.state in _reached_decision_states
+        and s.created_at and s.created_at.date() == today
+    )
 
     return {
         "operator_name": current_user.email.split("@")[0],
@@ -137,7 +159,7 @@ async def scan_document(
         # this only matters if the OCR call below fails partway through
         # and a retry needs to know classification already succeeded.
         session_data["step"] = 2
-        redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
+        redis_client.set(f"session:{session_id}", json.dumps(session_data), ex=3600)
 
         document_type = classification.get("document_type", "uk_driving_licence")
         files = {'file': (file.filename, file_bytes, file.content_type)}
@@ -157,7 +179,7 @@ async def scan_document(
         session_data["ocr"] = result["extracted_data"]
         session_data["validation"] = result["validation"]
         session_data["step"] = 3
-        redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
+        redis_client.set(f"session:{session_id}", json.dumps(session_data), ex=3600)
 
         # Log exactly what was extracted vs. how confident/valid it was,
         # per-field — this is the primary tool for diagnosing bad
@@ -362,7 +384,7 @@ async def face_match(
             session_data["risk_score"] = risk_score
             session_data["reason"] = reason
             session_data["step"] = 4
-            redis_client.setex(f"session:{session_id}", 3600, json.dumps(session_data))
+            redis_client.set(f"session:{session_id}", json.dumps(session_data), ex=3600)
 
             try:
                 session_service.update_session_data(db, session_id, {
@@ -385,7 +407,16 @@ async def face_match(
                 "venue_check": session_data["venue_check"]
             }
         elif response.status_code == 422:
-            raise HTTPException(status_code=422, detail="No face detected in the captured image")
+            # Surface the ai-service's specific reason (no face detected vs.
+            # face detected but too low-confidence/small to trust) instead
+            # of a single generic message — the operator needs to know
+            # whether to reposition the ID or retake the selfie.
+            detail = "No face detected in the captured image"
+            try:
+                detail = response.json().get("message", detail)
+            except Exception:
+                pass
+            raise HTTPException(status_code=422, detail=detail)
         else:
             raise HTTPException(status_code=500, detail="Face matching failed")
 
@@ -695,7 +726,7 @@ async def get_session_history(
         results.append({
             "session_id": s.id,
             "status": s.state.value if s.state else "UNKNOWN",
-            "created_at": s.created_at.isoformat(),
+            "created_at": to_utc_iso(s.created_at),
             "customer_id": s.customer_id,
             "final_decision": s.final_decision or "PENDING"
         })
@@ -715,7 +746,7 @@ async def get_notifications(
         "message": n.message,
         "type": n.type,
         "is_read": n.is_read,
-        "created_at": n.created_at.isoformat()
+        "created_at": to_utc_iso(n.created_at)
     } for n in notifs]
 
 from backend.api.deps import RoleChecker
@@ -814,7 +845,7 @@ async def get_retention_logs(limit: int = 50, db: Session = Depends(get_db)):
     return [
         {
             "id": log.id,
-            "timestamp": log.timestamp.isoformat(),
+            "timestamp": to_utc_iso(log.timestamp),
             "details": log.details,
         }
         for log in logs

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -14,8 +14,7 @@ class UserResponse(UserBase):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class Token(BaseModel):
     access_token: str
@@ -34,8 +33,7 @@ class CustomerResponse(BaseModel):
     manager_notes: Optional[str] = None
     warnings: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class VenueCreateRequest(BaseModel):
     name: str
@@ -55,8 +53,7 @@ class VenueResponse(BaseModel):
     max_capacity: Optional[int] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BlacklistCreate(BaseModel):
     customer_name: str

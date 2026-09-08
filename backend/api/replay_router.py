@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 
 from backend.api.deps import get_db, get_current_active_user
 from backend.models.models import VerificationSession, SessionAuditLog, User, RoleEnum
+from backend.core.datetime_utils import to_utc_iso
 
 router = APIRouter(prefix="/api/v1/replay", tags=["replay"], dependencies=[Depends(get_current_active_user)])
 
@@ -60,7 +61,7 @@ async def get_session_timeline(
     for log in logs:
         timeline.append({
             "id": log.id,
-            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "timestamp": to_utc_iso(log.timestamp),
             "operator_id": log.operator_id,
             "state_from": log.state_from,
             "state_to": log.state_to,
